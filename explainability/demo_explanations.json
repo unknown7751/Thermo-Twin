@@ -1,0 +1,44 @@
+{
+  "scenario_1_refrigerant_leak": {
+    "compressor_power_pct": 4.4,
+    "discharge_pressure_pct": 6.6,
+    "fan_rpm_pct": 4.4,
+    "supply_air_temp_pct": 84.6,
+    "summary": "Anomaly driven primarily by Temp Rise (85%)",
+    "fault_type": "Refrigerant Leak",
+    "prescription": {
+      "fault": "Refrigerant Leak in Evaporator Coil",
+      "impact": "Cooling efficiency down ~40%, unit running but not cooling",
+      "action": "Dispatch technician with refrigerant recharge kit and leak detector"
+    },
+    "severity_score": 100
+  },
+  "scenario_2_fan_failure": {
+    "compressor_power_pct": 26.2,
+    "discharge_pressure_pct": 9.0,
+    "fan_rpm_pct": 47.5,
+    "supply_air_temp_pct": 17.3,
+    "summary": "Anomaly driven by Fan RPM (48%) and Compressor Power (26%)",
+    "fault_type": "Condenser Fan Failure",
+    "prescription": {
+      "fault": "Condenser Fan Motor Degradation or Failure",
+      "impact": "Heat dissipation failure, compressor overload risk",
+      "action": "Dispatch with 5HP Fan Motor replacement"
+    },
+    "severity_score": 100
+  },
+  "scenario_3_compressor_wear": {
+    "compressor_power_pct": 62.3,
+    "discharge_pressure_pct": 6.8,
+    "fan_rpm_pct": 0.6,
+    "supply_air_temp_pct": 30.3,
+    "summary": "Anomaly driven by Compressor Power (62%) and Temp Rise (30%)",
+    "fault_type": "Compressor Wear",
+    "prescription": {
+      "fault": "Progressive Compressor Mechanical Wear",
+      "impact": "Progressive efficiency loss, full failure imminent",
+      "action": "Schedule compressor replacement within 2 weeks"
+    },
+    "severity_score": 91
+  }
+}

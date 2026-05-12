@@ -1,0 +1,18 @@
+﻿# Large generated files
+data/raw/*.csv
+data/processed/*.npz
+data/processed/*.pkl
+model/checkpoints/*.pt
+model/checkpoints/*.pkl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
