@@ -596,3 +596,111 @@ def _live_panel():
 
 
 _live_panel()
+
+# -- LBNL Real-World Validation Section ----------------------------------------
+
+st.markdown("---")
+st.markdown('<p style="font-size:1.4rem;font-weight:800;color:#E6EDF3;margin-bottom:0.3rem">'
+            '🏛️ Real-World Validation</p>', unsafe_allow_html=True)
+st.markdown('<p style="color:#8B949E;font-size:0.88rem;margin-top:0">'
+            'Sim-to-Real Transfer — Synthetic-trained model tested on '
+            'LBNL Building Fault Detection Dataset (30,240 real RTU data points)</p>',
+            unsafe_allow_html=True)
+
+_lbnl_results_path = ROOT / "model" / "checkpoints" / "lbnl_evaluation_results.json"
+if _lbnl_results_path.exists():
+    with open(_lbnl_results_path) as _f:
+        _lbnl = json.load(_f)
+
+    _prec  = _lbnl.get("precision", 0)
+    _rec   = _lbnl.get("recall", 0)
+    _f1    = _lbnl.get("f1_score", 0)
+    _auc   = _lbnl.get("roc_auc", 0)
+    _det   = _lbnl.get("fault_detection_rate", 0)
+    _sev70 = _lbnl.get("fault_above_70_pct", 0)
+    _n40   = _lbnl.get("normal_below_40_pct", 0)
+    _n_test = _lbnl.get("test_samples", 0)
+    _n_fault = _lbnl.get("test_fault", 0)
+    _n_normal = _lbnl.get("test_normal", 0)
+
+    lc1, lc2, lc3, lc4 = st.columns(4)
+
+    with lc1:
+        st.markdown(f"""
+        <div style="background:#0d2b0d;border:2px solid #4CAF50;border-radius:12px;
+                    padding:1.2rem;text-align:center">
+          <div style="font-size:2.6rem;font-weight:900;color:#4CAF50;line-height:1.0">{_f1:.2%}</div>
+          <div style="font-size:0.72rem;color:#8B949E;margin-top:.3rem;text-transform:uppercase;
+                      letter-spacing:1px">F1 Score</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with lc2:
+        st.markdown(f"""
+        <div style="background:#0d2b0d;border:2px solid #4CAF50;border-radius:12px;
+                    padding:1.2rem;text-align:center">
+          <div style="font-size:2.6rem;font-weight:900;color:#4CAF50;line-height:1.0">{_auc:.2%}</div>
+          <div style="font-size:0.72rem;color:#8B949E;margin-top:.3rem;text-transform:uppercase;
+                      letter-spacing:1px">ROC-AUC</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with lc3:
+        st.markdown(f"""
+        <div style="background:#0d2b0d;border:2px solid #4CAF50;border-radius:12px;
+                    padding:1.2rem;text-align:center">
+          <div style="font-size:2.6rem;font-weight:900;color:#4CAF50;line-height:1.0">{_det:.0f}%</div>
+          <div style="font-size:0.72rem;color:#8B949E;margin-top:.3rem;text-transform:uppercase;
+                      letter-spacing:1px">Fault Detection</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with lc4:
+        st.markdown(f"""
+        <div style="background:#0d2b0d;border:2px solid #4CAF50;border-radius:12px;
+                    padding:1.2rem;text-align:center">
+          <div style="font-size:2.6rem;font-weight:900;color:#4CAF50;line-height:1.0">{_sev70:.0f}%</div>
+          <div style="font-size:0.72rem;color:#8B949E;margin-top:.3rem;text-transform:uppercase;
+                      letter-spacing:1px">Faults Sev &ge;70</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Detailed metrics table
+    st.markdown(f"""
+    <div style="background:#161B22;border:1px solid #30363D;border-radius:10px;
+                padding:1.2rem 1.6rem;margin-top:0.8rem">
+      <div style="font-size:0.82rem;font-weight:700;color:#4C9BE8;margin-bottom:0.8rem;
+                  text-transform:uppercase;letter-spacing:1px">
+        Detailed Metrics
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:0.88rem">
+        <tr style="border-bottom:1px solid #30363D">
+          <td style="padding:0.4rem 0;color:#8B949E">Precision</td>
+          <td style="padding:0.4rem 0;color:#E6EDF3;text-align:right;font-weight:600">{_prec:.4f}</td>
+          <td style="padding:0.4rem 0 0.4rem 2rem;color:#8B949E">Recall</td>
+          <td style="padding:0.4rem 0;color:#E6EDF3;text-align:right;font-weight:600">{_rec:.4f}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #30363D">
+          <td style="padding:0.4rem 0;color:#8B949E">Normal &le;40 severity</td>
+          <td style="padding:0.4rem 0;color:#4CAF50;text-align:right;font-weight:600">{_n40:.1f}%</td>
+          <td style="padding:0.4rem 0 0.4rem 2rem;color:#8B949E">Fault &ge;70 severity</td>
+          <td style="padding:0.4rem 0;color:#F44336;text-align:right;font-weight:600">{_sev70:.1f}%</td>
+        </tr>
+        <tr>
+          <td style="padding:0.4rem 0;color:#8B949E">Test Normal</td>
+          <td style="padding:0.4rem 0;color:#E6EDF3;text-align:right;font-weight:600">{_n_normal:,} windows</td>
+          <td style="padding:0.4rem 0 0.4rem 2rem;color:#8B949E">Test Fault (Real)</td>
+          <td style="padding:0.4rem 0;color:#E6EDF3;text-align:right;font-weight:600">{_n_fault:,} windows</td>
+        </tr>
+      </table>
+      <div style="color:#8B949E;font-size:0.72rem;margin-top:0.6rem;font-style:italic">
+        Model trained on synthetic data only &mdash; tested on real LBNL RTU building data (Aug 2017 &ndash; Feb 2018)
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown(
+        '<div style="color:#8B949E;font-style:italic;padding:.5rem">'
+        'Run model/evaluate_lbnl.py to generate real-world validation metrics.</div>',
+        unsafe_allow_html=True,
+    )
