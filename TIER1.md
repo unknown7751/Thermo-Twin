@@ -1,4 +1,4 @@
-﻿# Thermo-Twin — Tier 1 Improvements
+# Thermo-Twin — Tier 1 Improvements
 
 > Three production-grade upgrades added post-Phase 6: dynamic anomaly thresholds,
 > physics-informed model training, and financial cost attribution per fault.
@@ -37,10 +37,10 @@ improvements that address real-world deployment concerns judges will probe.
 
 ### Problem with the static threshold
 
-The original threshold `0.1938` was computed once at training time:
+The original threshold `0.2007` was computed once at training time:
 
 ```
-threshold = val_mean + 2.5 × val_std  =  0.1446 + 2.5 × 0.0197  =  0.1938
+threshold = val_mean + 2.5 × val_std  =  0.1484 + 2.5 × 0.0209  =  0.2007
 ```
 
 This is a single fixed decision boundary for all operating conditions. In reality:
@@ -67,7 +67,7 @@ ThresholdManager
 
 ```python
 if buffer_size < 50:
-    threshold = 0.193788          # static fallback — not enough data yet
+    threshold = 0.200733          # static fallback — not enough data yet
 else:
     threshold = np.quantile(buffer, 0.95)   # live recalibration
 ```
@@ -127,7 +127,7 @@ The `/health` endpoint now exposes threshold status:
 {
   "status": "ok",
   "service": "Thermo-Twin Alert Backend",
-  "threshold": 0.193788,
+  "threshold": 0.200733,
   "threshold_mode": "static_fallback",
   "buffer_size": 0
 }
@@ -400,7 +400,7 @@ Full end-to-end test run after all three steps complete:
 ```
 GET /health
   status:         ok
-  threshold:      0.193788
+  threshold:      0.200733
   threshold_mode: static_fallback   (updates to "dynamic" after 50 normal windows)
   buffer_size:    0
 
@@ -440,7 +440,7 @@ All SHAP attribution percentages sum to 100% on all three scenarios.
 | `explainability/alert_payload.py` | Added `FAULT_ENERGY_PROFILES`, `_compute_energy_cost()`, `energy_cost` field in every alert payload |
 | `dashboard/app.py` | Added energy cost card below prescription card; replaced deprecated `use_container_width` with `width="stretch"` |
 | `backend/app.py` | Added `ThresholdManager` integration; `/health` now returns `threshold`, `threshold_mode`, `buffer_size` |
-| `model/checkpoints/threshold_config.json` | Updated with new training-run values (threshold=0.193788) |
+| `model/checkpoints/threshold_config.json` | Updated with new training-run values (threshold=0.200733) |
 | `explainability/demo_explanations.json` | Regenerated from physics-trained model |
 | `data/processed/` | Generated: `train_windows.npz`, `val_windows.npz`, `test_windows.npz`, `scaler.pkl` |
 | `model/checkpoints/autoencoder.pt` | Retrained with PhysicsLoss |
