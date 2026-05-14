@@ -254,7 +254,7 @@ with c3:
     if st.button("🔵  Trigger: Compressor Wear", width="stretch"):
         _trigger("scenario_3_compressor_wear", "compressor")
 
-# -- Fetch latest state --------------------------------------------------------
+# -- Fetch alerts for signal plot coloring (full-rerun only) ------------------
 
 alerts = _get_alerts()
 latest = alerts[0] if alerts else None
@@ -335,236 +335,243 @@ fig.update_layout(
 )
 st.plotly_chart(fig, width="stretch")
 
-# -- Severity | SHAP | Machine info --------------------------------------------
+# -- Live panel (auto-refreshes every 2s without fading the page) --------------
 
-col_sev, col_shap, col_info = st.columns([1, 2, 1])
+@st.fragment(run_every=2)
+def _live_panel():
+    alerts = _get_alerts()
+    latest = alerts[0] if alerts else None
+    sev    = (latest or {}).get("severity_score", 0)
+    expl   = (latest or {}).get("explanation", {})
 
-# - Severity gauge -
-with col_sev:
-    st.markdown("**Severity Score**")
-    uncertainty   = (latest or {}).get("uncertainty", None)
-    confidence    = (latest or {}).get("confidence_pct", None)
-    action_ovride = (latest or {}).get("action_override", None)
+    # -- Severity | SHAP | Machine info --------------------------------------------
 
-    _level, _act_label = _clf.classify(sev)
-    if _level == "NORMAL":
-        cls, col_hex = "sev-normal",   "#4CAF50"
-    elif _level == "WARNING":
-        cls, col_hex = "sev-warning",  "#FF9800"
-    else:
-        cls, col_hex = "sev-critical", "#F44336"
-    act = action_ovride if action_ovride else _act_label
+    col_sev, col_shap, col_info = st.columns([1, 2, 1])
 
-    unc_line  = (f'<div style="font-size:1.1rem;color:#8B949E;margin:-.1rem 0 .1rem">'
-                 f'&plusmn;&thinsp;{uncertainty}</div>') if uncertainty is not None else ""
-    conf_line = (f'<div style="font-size:0.7rem;color:#8B949E;margin:.0rem 0 .3rem">'
-                 f'{confidence}% confidence</div>') if confidence is not None else ""
+    # - Severity gauge -
+    with col_sev:
+        st.markdown("**Severity Score**")
+        uncertainty   = (latest or {}).get("uncertainty", None)
+        confidence    = (latest or {}).get("confidence_pct", None)
+        action_ovride = (latest or {}).get("action_override", None)
 
-    st.markdown(f"""
-    <div class="sev-card {cls}">
-      <div style="font-size:3.8rem;font-weight:900;color:{col_hex};line-height:1.0">{sev}</div>
-      {unc_line}
-      {conf_line}
-      <div style="font-size:0.72rem;color:#8B949E;margin:.2rem 0 .5rem">/ 100</div>
-      <div style="font-size:0.82rem;font-weight:700;color:{col_hex}">{act}</div>
-    </div>
-    """, unsafe_allow_html=True)
+        _level, _act_label = _clf.classify(sev)
+        if _level == "NORMAL":
+            cls, col_hex = "sev-normal",   "#4CAF50"
+        elif _level == "WARNING":
+            cls, col_hex = "sev-warning",  "#FF9800"
+        else:
+            cls, col_hex = "sev-critical", "#F44336"
+        act = action_ovride if action_ovride else _act_label
 
-# - SHAP bar chart -
-with col_shap:
-    st.markdown("**Fault Attribution -- Which Sensor Drove This?**")
-    shap_vals = {
-        "Compressor Power":   expl.get("compressor_power_pct",   25.0 if not latest else 0),
-        "Discharge Pressure": expl.get("discharge_pressure_pct", 25.0 if not latest else 0),
-        "Fan RPM":            expl.get("fan_rpm_pct",            25.0 if not latest else 0),
-        "Supply Air Temp":    expl.get("supply_air_temp_pct",    25.0 if not latest else 0),
-    }
-    sorted_sv  = sorted(shap_vals.items(), key=lambda x: x[1], reverse=True)
-    bar_labels = [k for k, _ in sorted_sv]
-    bar_values = [v for _, v in sorted_sv]
-    bar_colors = ["#F44336" if i == 0 else "#4C9BE8" for i in range(len(bar_values))]
+        unc_line  = (f'<div style="font-size:1.1rem;color:#8B949E;margin:-.1rem 0 .1rem">'
+                     f'&plusmn;&thinsp;{uncertainty}</div>') if uncertainty is not None else ""
+        conf_line = (f'<div style="font-size:0.7rem;color:#8B949E;margin:.0rem 0 .3rem">'
+                     f'{confidence}% confidence</div>') if confidence is not None else ""
 
-    fig_shap = go.Figure(go.Bar(
-        x=bar_values, y=bar_labels, orientation="h",
-        marker_color=bar_colors,
-        text=[f"{v:.1f}%" for v in bar_values],
-        textposition="outside",
-        textfont=dict(color="#E6EDF3", size=12),
-    ))
-    fig_shap.update_layout(
-        paper_bgcolor="#0D1117", plot_bgcolor="#161B22",
-        font_color="#E6EDF3", height=210,
-        margin=dict(l=0, r=55, t=10, b=0),
-        xaxis=dict(
-            range=[0, 115], showgrid=True, gridcolor="#21262D",
-            tickfont=dict(color="#8B949E"),
-            title="Attribution (%)", title_font=dict(color="#8B949E", size=11),
-        ),
-        yaxis=dict(tickfont=dict(color="#E6EDF3", size=12)),
-    )
-    st.plotly_chart(fig_shap, width="stretch")
-
-# - Machine info -
-with col_info:
-    st.markdown("**Machine Info**")
-    if latest:
-        mid   = latest.get("machine_id", "—")
-        ts    = latest.get("timestamp",  "—")
-        ft    = latest.get("fault_type", "—")
-        act   = latest.get("action",     "—")
-        a_col = "#F44336" if act in ("STOP UNIT", "INVESTIGATE") else ("#FF9800" if act == "WARNING" else "#4CAF50")
         st.markdown(f"""
-        <div class="mcard">
-          <div class="mlabel">Machine</div>
-          <div class="mvalue">{mid}</div>
-          <div class="mlabel">Last Alert</div>
-          <div class="mvalue" style="font-size:.82rem">{ts}</div>
-          <div class="fault-big">{ft}</div>
-          <div style="color:{a_col};font-weight:700;font-size:.95rem;margin-top:.3rem">{act}</div>
+        <div class="sev-card {cls}">
+          <div style="font-size:3.8rem;font-weight:900;color:{col_hex};line-height:1.0">{sev}</div>
+          {unc_line}
+          {conf_line}
+          <div style="font-size:0.72rem;color:#8B949E;margin:.2rem 0 .5rem">/ 100</div>
+          <div style="font-size:0.82rem;font-weight:700;color:{col_hex}">{act}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # - SHAP bar chart -
+    with col_shap:
+        st.markdown("**Fault Attribution -- Which Sensor Drove This?**")
+        shap_vals = {
+            "Compressor Power":   expl.get("compressor_power_pct",   25.0 if not latest else 0),
+            "Discharge Pressure": expl.get("discharge_pressure_pct", 25.0 if not latest else 0),
+            "Fan RPM":            expl.get("fan_rpm_pct",            25.0 if not latest else 0),
+            "Supply Air Temp":    expl.get("supply_air_temp_pct",    25.0 if not latest else 0),
+        }
+        sorted_sv  = sorted(shap_vals.items(), key=lambda x: x[1], reverse=True)
+        bar_labels = [k for k, _ in sorted_sv]
+        bar_values = [v for _, v in sorted_sv]
+        bar_colors = ["#F44336" if i == 0 else "#4C9BE8" for i in range(len(bar_values))]
+
+        fig_shap = go.Figure(go.Bar(
+            x=bar_values, y=bar_labels, orientation="h",
+            marker_color=bar_colors,
+            text=[f"{v:.1f}%" for v in bar_values],
+            textposition="outside",
+            textfont=dict(color="#E6EDF3", size=12),
+        ))
+        fig_shap.update_layout(
+            paper_bgcolor="#0D1117", plot_bgcolor="#161B22",
+            font_color="#E6EDF3", height=210,
+            margin=dict(l=0, r=55, t=10, b=0),
+            xaxis=dict(
+                range=[0, 115], showgrid=True, gridcolor="#21262D",
+                tickfont=dict(color="#8B949E"),
+                title="Attribution (%)", title_font=dict(color="#8B949E", size=11),
+            ),
+            yaxis=dict(tickfont=dict(color="#E6EDF3", size=12)),
+        )
+        st.plotly_chart(fig_shap, width="stretch")
+
+    # - Machine info -
+    with col_info:
+        st.markdown("**Machine Info**")
+        if latest:
+            mid   = latest.get("machine_id", "—")
+            ts    = latest.get("timestamp",  "—")
+            ft    = latest.get("fault_type", "—")
+            act   = latest.get("action",     "—")
+            a_col = "#F44336" if act in ("STOP UNIT", "INVESTIGATE") else ("#FF9800" if act == "WARNING" else "#4CAF50")
+            st.markdown(f"""
+            <div class="mcard">
+              <div class="mlabel">Machine</div>
+              <div class="mvalue">{mid}</div>
+              <div class="mlabel">Last Alert</div>
+              <div class="mvalue" style="font-size:.82rem">{ts}</div>
+              <div class="fault-big">{ft}</div>
+              <div style="color:{a_col};font-weight:700;font-size:.95rem;margin-top:.3rem">{act}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="mcard">
+              <div style="color:#8B949E;font-style:italic;font-size:.9rem">
+                No alerts yet.<br>Trigger a scenario above.
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # -- Prescription card ---------------------------------------------------------
+
+    st.markdown("---")
+    if latest and sev > 40:
+        presc = latest.get("prescription", {})
+        p_cls = "presc-critical" if sev > 70 else "presc-warning"
+        icon  = "🚨" if sev > 70 else "⚠️"
+        st.markdown(f"""
+        <div class="presc-card {p_cls}">
+          <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
+            {icon}&nbsp; Prescriptive Maintenance Alert
+          </div>
+          <div class="plabel">Fault</div>
+          <div class="pvalue">{presc.get("fault", "—")}</div>
+          <div class="plabel">Impact</div>
+          <div class="pvalue">{presc.get("impact", "—")}</div>
+          <div class="plabel">Prescription</div>
+          <div class="pvalue" style="color:#FF9800;font-weight:700">{presc.get("action", "—")}</div>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown("""
-        <div class="mcard">
-          <div style="color:#8B949E;font-style:italic;font-size:.9rem">
-            No alerts yet.<br>Trigger a scenario above.
-          </div>
+        <div class="presc-normal">
+          <span style="color:#8B949E;font-size:.9rem">
+            ✅ No active fault -- system operating normally.
+            Trigger a demo scenario to see prescriptive output.
+          </span>
         </div>
         """, unsafe_allow_html=True)
 
-# -- Prescription card ---------------------------------------------------------
+    # -- Energy cost card ----------------------------------------------------------
 
-st.markdown("---")
-if latest and sev > 40:
-    presc = latest.get("prescription", {})
-    p_cls = "presc-critical" if sev > 70 else "presc-warning"
-    icon  = "🚨" if sev > 70 else "⚠️"
-    st.markdown(f"""
-    <div class="presc-card {p_cls}">
-      <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
-        {icon}&nbsp; Prescriptive Maintenance Alert
-      </div>
-      <div class="plabel">Fault</div>
-      <div class="pvalue">{presc.get("fault", "—")}</div>
-      <div class="plabel">Impact</div>
-      <div class="pvalue">{presc.get("impact", "—")}</div>
-      <div class="plabel">Prescription</div>
-      <div class="pvalue" style="color:#FF9800;font-weight:700">{presc.get("action", "—")}</div>
-    </div>
-    """, unsafe_allow_html=True)
-else:
-    st.markdown("""
-    <div class="presc-normal">
-      <span style="color:#8B949E;font-size:.9rem">
-        ✅ No active fault -- system operating normally.
-        Trigger a demo scenario to see prescriptive output.
-      </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-# -- Energy cost card ----------------------------------------------------------
-
-if latest and sev > 40:
-    ec = latest.get("energy_cost", {})
-    if ec:
-        kwh      = ec.get("energy_waste_kwh_per_hr", 0)
-        inr_day  = ec.get("cost_per_day_inr", 0)
-        usd_day  = ec.get("cost_per_day_usd", 0)
-        inr_mon  = ec.get("cost_per_month_inr", 0)
-        part     = ec.get("part_cost_inr", 0)
-        payback  = ec.get("payback_days", 0)
-        eff_loss = ec.get("efficiency_loss_pct", 0)
-        st.markdown(f"""
-        <div style="background:#0D1E10;border:1px solid #2E7D32;border-left:6px solid #4CAF50;
-                    border-radius:10px;padding:1.2rem 1.6rem;margin-top:.5rem">
-          <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
-            💰&nbsp; Energy Cost Impact
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem">
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Efficiency Loss</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#F44336">{eff_loss}%</div>
+    if latest and sev > 40:
+        ec = latest.get("energy_cost", {})
+        if ec:
+            kwh      = ec.get("energy_waste_kwh_per_hr", 0)
+            inr_day  = ec.get("cost_per_day_inr", 0)
+            usd_day  = ec.get("cost_per_day_usd", 0)
+            inr_mon  = ec.get("cost_per_month_inr", 0)
+            part     = ec.get("part_cost_inr", 0)
+            payback  = ec.get("payback_days", 0)
+            eff_loss = ec.get("efficiency_loss_pct", 0)
+            st.markdown(f"""
+            <div style="background:#0D1E10;border:1px solid #2E7D32;border-left:6px solid #4CAF50;
+                        border-radius:10px;padding:1.2rem 1.6rem;margin-top:.5rem">
+              <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
+                💰&nbsp; Energy Cost Impact
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem">
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Efficiency Loss</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#F44336">{eff_loss}%</div>
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Wasted Energy</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#FF9800">{kwh} kWh/hr</div>
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Payback Period</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#4CAF50">{payback} days</div>
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost Today</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_day:,.0f} / ${usd_day}</div>
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost This Month</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_mon:,.0f}</div>
+                </div>
+                <div>
+                  <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Fix Cost (Part)</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">~&#8377;{part:,}</div>
+                </div>
+              </div>
             </div>
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Wasted Energy</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#FF9800">{kwh} kWh/hr</div>
-            </div>
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Payback Period</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#4CAF50">{payback} days</div>
-            </div>
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost Today</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_day:,.0f} / ${usd_day}</div>
-            </div>
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost This Month</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_mon:,.0f}</div>
-            </div>
-            <div>
-              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Fix Cost (Part)</div>
-              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">~&#8377;{part:,}</div>
-            </div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-# -- Alert log table -----------------------------------------------------------
+    # -- Alert log table -----------------------------------------------------------
 
-st.markdown("---")
-st.markdown("**Alert Log -- Last 10 Events**")
+    st.markdown("---")
+    st.markdown("**Alert Log -- Last 10 Events**")
 
-if alerts:
-    _SEN_MAP = {
-        "compressor_power_pct":   "Compressor Power",
-        "discharge_pressure_pct": "Discharge Pressure",
-        "fan_rpm_pct":            "Fan RPM",
-        "supply_air_temp_pct":    "Supply Air Temp",
-    }
+    if alerts:
+        _SEN_MAP = {
+            "compressor_power_pct":   "Compressor Power",
+            "discharge_pressure_pct": "Discharge Pressure",
+            "fan_rpm_pct":            "Fan RPM",
+            "supply_air_temp_pct":    "Supply Air Temp",
+        }
 
-    def _dominant(e: dict) -> str:
-        if not e:
-            return "—"
-        best = max(_SEN_MAP, key=lambda k: e.get(k, 0))
-        return f"{_SEN_MAP[best]} ({e.get(best, 0):.1f}%)"
+        def _dominant(e: dict) -> str:
+            if not e:
+                return "—"
+            best = max(_SEN_MAP, key=lambda k: e.get(k, 0))
+            return f"{_SEN_MAP[best]} ({e.get(best, 0):.1f}%)"
 
-    rows = []
-    for a in alerts[:10]:
-        e   = a.get("explanation", {})
-        unc = a.get("uncertainty", None)
-        sev_display = str(a.get("severity_score", 0))
-        if unc is not None:
-            sev_display = f"{a.get('severity_score', 0)} ±{unc}"
-        rows.append({
-            "Time":            a.get("timestamp", "—")[-8:],
-            "Machine":         a.get("machine_id", "—"),
-            "Fault Type":      a.get("fault_type", "—"),
-            "Severity":        a.get("severity_score", 0),
-            "Confidence":      f"{a.get('confidence_pct', '—')}%" if a.get("confidence_pct") else "—",
-            "Action":          a.get("action", "—"),
-            "Dominant Sensor": _dominant(e),
-        })
+        rows = []
+        for a in alerts[:10]:
+            e   = a.get("explanation", {})
+            unc = a.get("uncertainty", None)
+            sev_display = str(a.get("severity_score", 0))
+            if unc is not None:
+                sev_display = f"{a.get('severity_score', 0)} ±{unc}"
+            rows.append({
+                "Time":            a.get("timestamp", "—")[-8:],
+                "Machine":         a.get("machine_id", "—"),
+                "Fault Type":      a.get("fault_type", "—"),
+                "Severity":        a.get("severity_score", 0),
+                "Confidence":      f"{a.get('confidence_pct', '—')}%" if a.get("confidence_pct") else "—",
+                "Action":          a.get("action", "—"),
+                "Dominant Sensor": _dominant(e),
+            })
 
-    df_log = pd.DataFrame(rows)
+        df_log = pd.DataFrame(rows)
 
-    def _colour_sev(val):
-        try:
-            s = int(val)
-        except Exception:
-            return ""
-        if s <= 40:  return "background-color:#0d2b0d;color:#4CAF50"
-        if s <= 70:  return "background-color:#2b1a00;color:#FF9800"
-        return "background-color:#2b0505;color:#F44336"
+        def _colour_sev(val):
+            try:
+                s = int(val)
+            except Exception:
+                return ""
+            if s <= 40:  return "background-color:#0d2b0d;color:#4CAF50"
+            if s <= 70:  return "background-color:#2b1a00;color:#FF9800"
+            return "background-color:#2b0505;color:#F44336"
 
-    styled = df_log.style.map(_colour_sev, subset=["Severity"])
-    st.dataframe(styled, width="stretch", hide_index=True)
-else:
-    st.markdown(
-        "<div style='color:#8B949E;font-style:italic;padding:.5rem'>No alerts yet.</div>",
-        unsafe_allow_html=True,
-    )
+        styled = df_log.style.map(_colour_sev, subset=["Severity"])
+        st.dataframe(styled, width="stretch", hide_index=True)
+    else:
+        st.markdown(
+            "<div style='color:#8B949E;font-style:italic;padding:.5rem'>No alerts yet.</div>",
+            unsafe_allow_html=True,
+        )
 
-# -- Auto-poll every 2 seconds -------------------------------------------------
 
-time.sleep(2)
-st.rerun()
+_live_panel()
