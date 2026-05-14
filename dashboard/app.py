@@ -182,13 +182,13 @@ st.markdown('<div class="carrier-bar"></div>', unsafe_allow_html=True)
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    if st.button("🔴  Trigger: Refrigerant Leak", use_container_width=True):
+    if st.button("🔴  Trigger: Refrigerant Leak", width="stretch"):
         _trigger("scenario_1_refrigerant_leak", "refrigerant")
 with c2:
-    if st.button("🟡  Trigger: Fan Failure", use_container_width=True):
+    if st.button("🟡  Trigger: Fan Failure", width="stretch"):
         _trigger("scenario_2_fan_failure", "fan")
 with c3:
-    if st.button("🔵  Trigger: Compressor Wear", use_container_width=True):
+    if st.button("🔵  Trigger: Compressor Wear", width="stretch"):
         _trigger("scenario_3_compressor_wear", "compressor")
 
 # ─── Fetch latest state ───────────────────────────────────────────────────────
@@ -270,7 +270,7 @@ fig.update_layout(
                title="Normalised Value", title_font=dict(color="#8B949E", size=11),
                range=[-0.1, 1.25]),
 )
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
 # ─── Severity | SHAP | Machine info ──────────────────────────────────────────
 
@@ -326,7 +326,7 @@ with col_shap:
         ),
         yaxis=dict(tickfont=dict(color="#E6EDF3", size=12)),
     )
-    st.plotly_chart(fig_shap, use_container_width=True)
+    st.plotly_chart(fig_shap, width="stretch")
 
 # — Machine info —
 with col_info:
@@ -429,7 +429,7 @@ if alerts:
         return "background-color:#2b0505;color:#F44336"
 
     styled = df_log.style.map(_colour_sev, subset=["Severity"])
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    st.dataframe(styled, width="stretch", hide_index=True)
 else:
     st.markdown(
         "<div style='color:#8B949E;font-style:italic;padding:.5rem'>No alerts yet.</div>",
