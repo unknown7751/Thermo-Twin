@@ -323,9 +323,9 @@ Training configuration:
   PhysicsLoss  : lambda=0.1  k1=0.9828  k2=0.9675  k3=−0.9084  (from unit baselines)
 
 Threshold calibration (val set):
-  val_mean     : 0.148002
-  val_std      : 0.020625
-  threshold    : 0.199565  (mean + 2.5σ)
+  val_mean     : 0.148406
+  val_std      : 0.020931
+  threshold    : 0.200733  (mean + 2.5σ)
 ```
 
 | Label | MSE mean | MSE std | Severity mean | Target |
