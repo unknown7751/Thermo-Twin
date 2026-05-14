@@ -1,5 +1,5 @@
 """
-Phase 6 — Thermo-Twin Operator Dashboard
+Phase 6 -- Thermo-Twin Operator Dashboard
 Streamlit dashboard for live HVAC fault monitoring and prescriptive diagnostics.
 
 Run:
@@ -19,9 +19,11 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
+from model.threshold import SEVERITY_PROFILES, SeverityClassifier
+
 BACKEND = "http://localhost:5000"
 
-# ─── Page config ──────────────────────────────────────────────────────────────
+# -- Page config ---------------------------------------------------------------
 
 st.set_page_config(
     page_title="Thermo-Twin | Carrier HVAC Diagnostics",
@@ -29,7 +31,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# ─── CSS ──────────────────────────────────────────────────────────────────────
+# -- CSS -----------------------------------------------------------------------
 
 st.markdown("""
 <style>
@@ -73,7 +75,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Signal simulation ────────────────────────────────────────────────────────
+# -- Signal simulation ---------------------------------------------------------
 
 # Per-stream ranges for 0-1 normalisation (for chart clarity)
 _RANGES = {
@@ -134,7 +136,7 @@ def _fault_signal(scenario: str, n: int = 70) -> pd.DataFrame:
     })
 
 
-# ─── Session state ────────────────────────────────────────────────────────────
+# -- Session state -------------------------------------------------------------
 
 if "signal" not in st.session_state:
     st.session_state.signal = _normal_signal(200)
@@ -144,7 +146,7 @@ if "last_count" not in st.session_state:
     st.session_state.last_count = 0
 
 
-# ─── Backend helpers ──────────────────────────────────────────────────────────
+# -- Backend helpers -----------------------------------------------------------
 
 def _get_alerts() -> list:
     try:
@@ -158,7 +160,7 @@ def _trigger(scenario: str, tag: str):
     try:
         requests.post(f"{BACKEND}/demo/{scenario}", timeout=2)
     except Exception:
-        st.error("Backend unreachable — start it with: python backend/app.py")
+        st.error("Backend unreachable -- start it with: python backend/app.py")
         return
     fault_df = _fault_signal(tag)
     st.session_state.fault_at = len(st.session_state.signal)
@@ -169,16 +171,77 @@ def _trigger(scenario: str, tag: str):
     st.rerun()
 
 
-# ─── Header ───────────────────────────────────────────────────────────────────
+
+# -- Sidebar: severity profile ------------------------------------------------
+
+with st.sidebar:
+    st.markdown("### ⚙️ Severity Profile")
+    profile_labels = {
+        "hospital":         "🏥 Hospital / Critical Care",
+        "cold_chain":       "❄️ Cold Chain / Food Storage",
+        "commercial_office":"🏢 Commercial Office (default)",
+        "warehouse":        "🏭 Warehouse / Industrial",
+    }
+    selected_key = st.radio(
+        "Operational context",
+        options=list(profile_labels.keys()),
+        format_func=lambda k: profile_labels[k],
+        index=2,
+    )
+    _clf = SeverityClassifier(profile=selected_key)
+    _warn_t, _crit_t = _clf.thresholds()
+    st.markdown(f"""
+    <div style="background:#161B22;border:1px solid #30363D;border-radius:8px;padding:.8rem;margin-top:.5rem">
+      <div style="color:#8B949E;font-size:.7rem;text-transform:uppercase;letter-spacing:1px">Thresholds</div>
+      <div style="color:#FF9800;font-size:.9rem;margin-top:.3rem">⚠️ Warning  ≥ {_warn_t}</div>
+      <div style="color:#F44336;font-size:.9rem">🚨 Critical ≥ {_crit_t}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("**Unit Baselines**")
+    import json
+    from pathlib import Path as _P
+    _bdir = _P("model/checkpoints/unit_baselines")
+    if _bdir.exists():
+        for _bf in sorted(_bdir.glob("*.json")):
+            with open(_bf) as _f:
+                _r = json.load(_f)
+            st.markdown(
+                f"<div style='background:#161B22;border:1px solid #30363D;"
+                f"border-radius:6px;padding:.5rem .7rem;margin-bottom:.4rem'>"
+                f"<div style='color:#4C9BE8;font-size:.72rem;font-weight:700;"
+                f"text-transform:uppercase'>{_r['machine_id']}</div>"
+                f"<div style='color:#8B949E;font-size:.75rem;margin-top:.2rem'>"
+                f"Disc/Comp: <span style='color:#E6EDF3'>{_r['k_disc']:.1f}</span> &nbsp;"
+                f"Fan/Comp: <span style='color:#E6EDF3'>{_r['k_fan']:.1f}</span><br>"
+                f"Temp slope: <span style='color:#E6EDF3'>{_r['k_temp_b']:.3f}</span> &nbsp;"
+                f"Temp base: <span style='color:#E6EDF3'>{_r['k_temp_a']:.1f}°C</span>"
+                f"</div></div>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.markdown(
+            "<div style='color:#8B949E;font-size:.8rem'>Run preprocess.py first</div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("---")
+    st.markdown("**About**")
+    st.markdown(
+        "<div style='color:#8B949E;font-size:.8rem'>"
+        "Thermo-Twin v2 · Autoencoder + SHAP + MC-Dropout + Physics-Informed Loss"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+# -- Header --------------------------------------------------------------------
 
 st.markdown('<p class="header-title">🏭 Thermo-Twin | Carrier HVAC Diagnostics</p>',
             unsafe_allow_html=True)
 st.markdown(
-    '<p class="header-sub">Unsupervised Thermodynamic Fault Isolation — '
-    'Powered by Autoencoder + SHAP</p>', unsafe_allow_html=True)
+    '<p class="header-sub">Unsupervised Thermodynamic Fault Isolation -- '
+    'Powered by Autoencoder + SHAP + MC-Dropout</p>', unsafe_allow_html=True)
 st.markdown('<div class="carrier-bar"></div>', unsafe_allow_html=True)
 
-# ─── Demo trigger buttons ─────────────────────────────────────────────────────
+# -- Demo trigger buttons ------------------------------------------------------
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -191,13 +254,13 @@ with c3:
     if st.button("🔵  Trigger: Compressor Wear", width="stretch"):
         _trigger("scenario_3_compressor_wear", "compressor")
 
-# ─── Fetch latest state ───────────────────────────────────────────────────────
+# -- Fetch latest state --------------------------------------------------------
 
 alerts = _get_alerts()
 latest = alerts[0] if alerts else None
 st.session_state.last_count = len(alerts)
 
-# ─── Live signal plot ─────────────────────────────────────────────────────────
+# -- Live signal plot ----------------------------------------------------------
 
 sig   = st.session_state.signal
 n_pts = len(sig)
@@ -253,7 +316,7 @@ fig.update_layout(
     font_color="#E6EDF3", height=320,
     margin=dict(l=45, r=20, t=40, b=30),
     title=dict(
-        text="Live Sensor Streams — Normalised (0 = min, 1 = max per stream)",
+        text="Live Sensor Streams -- Normalised (0 = min, 1 = max per stream)",
         font=dict(color="#8B949E", size=11), x=0,
     ),
     legend=dict(
@@ -272,31 +335,44 @@ fig.update_layout(
 )
 st.plotly_chart(fig, width="stretch")
 
-# ─── Severity | SHAP | Machine info ──────────────────────────────────────────
+# -- Severity | SHAP | Machine info --------------------------------------------
 
 col_sev, col_shap, col_info = st.columns([1, 2, 1])
 
-# — Severity gauge —
+# - Severity gauge -
 with col_sev:
     st.markdown("**Severity Score**")
-    if sev <= 40:
-        cls, act, col_hex = "sev-normal",   "NORMAL — Log Only",            "#4CAF50"
-    elif sev <= 70:
-        cls, act, col_hex = "sev-warning",  "WARNING — Notify Operator",    "#FF9800"
+    uncertainty   = (latest or {}).get("uncertainty", None)
+    confidence    = (latest or {}).get("confidence_pct", None)
+    action_ovride = (latest or {}).get("action_override", None)
+
+    _level, _act_label = _clf.classify(sev)
+    if _level == "NORMAL":
+        cls, col_hex = "sev-normal",   "#4CAF50"
+    elif _level == "WARNING":
+        cls, col_hex = "sev-warning",  "#FF9800"
     else:
-        cls, act, col_hex = "sev-critical", "STOP UNIT — Dispatch Now",     "#F44336"
+        cls, col_hex = "sev-critical", "#F44336"
+    act = action_ovride if action_ovride else _act_label
+
+    unc_line  = (f'<div style="font-size:1.1rem;color:#8B949E;margin:-.1rem 0 .1rem">'
+                 f'&plusmn;&thinsp;{uncertainty}</div>') if uncertainty is not None else ""
+    conf_line = (f'<div style="font-size:0.7rem;color:#8B949E;margin:.0rem 0 .3rem">'
+                 f'{confidence}% confidence</div>') if confidence is not None else ""
 
     st.markdown(f"""
     <div class="sev-card {cls}">
       <div style="font-size:3.8rem;font-weight:900;color:{col_hex};line-height:1.0">{sev}</div>
+      {unc_line}
+      {conf_line}
       <div style="font-size:0.72rem;color:#8B949E;margin:.2rem 0 .5rem">/ 100</div>
       <div style="font-size:0.82rem;font-weight:700;color:{col_hex}">{act}</div>
     </div>
     """, unsafe_allow_html=True)
 
-# — SHAP bar chart —
+# - SHAP bar chart -
 with col_shap:
-    st.markdown("**Fault Attribution — Which Sensor Drove This?**")
+    st.markdown("**Fault Attribution -- Which Sensor Drove This?**")
     shap_vals = {
         "Compressor Power":   expl.get("compressor_power_pct",   25.0 if not latest else 0),
         "Discharge Pressure": expl.get("discharge_pressure_pct", 25.0 if not latest else 0),
@@ -328,7 +404,7 @@ with col_shap:
     )
     st.plotly_chart(fig_shap, width="stretch")
 
-# — Machine info —
+# - Machine info -
 with col_info:
     st.markdown("**Machine Info**")
     if latest:
@@ -336,7 +412,7 @@ with col_info:
         ts    = latest.get("timestamp",  "—")
         ft    = latest.get("fault_type", "—")
         act   = latest.get("action",     "—")
-        a_col = "#F44336" if act == "STOP UNIT" else ("#FF9800" if act == "WARNING" else "#4CAF50")
+        a_col = "#F44336" if act in ("STOP UNIT", "INVESTIGATE") else ("#FF9800" if act == "WARNING" else "#4CAF50")
         st.markdown(f"""
         <div class="mcard">
           <div class="mlabel">Machine</div>
@@ -356,7 +432,7 @@ with col_info:
         </div>
         """, unsafe_allow_html=True)
 
-# ─── Prescription card ────────────────────────────────────────────────────────
+# -- Prescription card ---------------------------------------------------------
 
 st.markdown("---")
 if latest and sev > 40:
@@ -380,16 +456,63 @@ else:
     st.markdown("""
     <div class="presc-normal">
       <span style="color:#8B949E;font-size:.9rem">
-        ✅ No active fault — system operating normally.
+        ✅ No active fault -- system operating normally.
         Trigger a demo scenario to see prescriptive output.
       </span>
     </div>
     """, unsafe_allow_html=True)
 
-# ─── Alert log table ──────────────────────────────────────────────────────────
+# -- Energy cost card ----------------------------------------------------------
+
+if latest and sev > 40:
+    ec = latest.get("energy_cost", {})
+    if ec:
+        kwh      = ec.get("energy_waste_kwh_per_hr", 0)
+        inr_day  = ec.get("cost_per_day_inr", 0)
+        usd_day  = ec.get("cost_per_day_usd", 0)
+        inr_mon  = ec.get("cost_per_month_inr", 0)
+        part     = ec.get("part_cost_inr", 0)
+        payback  = ec.get("payback_days", 0)
+        eff_loss = ec.get("efficiency_loss_pct", 0)
+        st.markdown(f"""
+        <div style="background:#0D1E10;border:1px solid #2E7D32;border-left:6px solid #4CAF50;
+                    border-radius:10px;padding:1.2rem 1.6rem;margin-top:.5rem">
+          <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
+            💰&nbsp; Energy Cost Impact
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem">
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Efficiency Loss</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#F44336">{eff_loss}%</div>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Wasted Energy</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#FF9800">{kwh} kWh/hr</div>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Payback Period</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#4CAF50">{payback} days</div>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost Today</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_day:,.0f} / ${usd_day}</div>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost This Month</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_mon:,.0f}</div>
+            </div>
+            <div>
+              <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Fix Cost (Part)</div>
+              <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">~&#8377;{part:,}</div>
+            </div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# -- Alert log table -----------------------------------------------------------
 
 st.markdown("---")
-st.markdown("**Alert Log — Last 10 Events**")
+st.markdown("**Alert Log -- Last 10 Events**")
 
 if alerts:
     _SEN_MAP = {
@@ -407,12 +530,17 @@ if alerts:
 
     rows = []
     for a in alerts[:10]:
-        e = a.get("explanation", {})
+        e   = a.get("explanation", {})
+        unc = a.get("uncertainty", None)
+        sev_display = str(a.get("severity_score", 0))
+        if unc is not None:
+            sev_display = f"{a.get('severity_score', 0)} ±{unc}"
         rows.append({
             "Time":            a.get("timestamp", "—")[-8:],
             "Machine":         a.get("machine_id", "—"),
             "Fault Type":      a.get("fault_type", "—"),
             "Severity":        a.get("severity_score", 0),
+            "Confidence":      f"{a.get('confidence_pct', '—')}%" if a.get("confidence_pct") else "—",
             "Action":          a.get("action", "—"),
             "Dominant Sensor": _dominant(e),
         })
@@ -436,7 +564,7 @@ else:
         unsafe_allow_html=True,
     )
 
-# ─── Auto-poll every 2 seconds ────────────────────────────────────────────────
+# -- Auto-poll every 2 seconds -------------------------------------------------
 
 time.sleep(2)
 st.rerun()

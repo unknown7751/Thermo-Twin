@@ -2,13 +2,13 @@
 SHAP-based explainability for the Thermo-Twin anomaly detection autoencoder.
 
 Decomposes reconstruction error into per-stream attributions across 4 sensors:
-  indices   0-49  → compressor_power_kw
-  indices  50-99  → discharge_pressure_psi
-  indices 100-149 → fan_rpm
-  indices 150-199 → supply_air_temp_c
+  indices   0-49  -> compressor_power_kw
+  indices  50-99  -> discharge_pressure_psi
+  indices 100-149 -> fan_rpm
+  indices 150-199 -> supply_air_temp_c
 
-Uses SHAP GradientExplainer (expected gradients) with a thin MSE-wrapper so
-SHAP values represent each feature's contribution to the reconstruction error.
+Uses SHAP GradientExplainer (expected gradients) with 200 normal background
+windows and a fixed seed for deterministic, reproducible SHAP values.
 Prescriptive rules are applied on top of the attribution to identify fault type
 and dispatch recommendation.
 """
@@ -25,7 +25,7 @@ sys.path.insert(0, str(ROOT))
 
 from model.autoencoder import load_autoencoder
 
-# ─── Stream index slices ──────────────────────────────────────────────────────
+# -- Stream index slices -------------------------------------------------------
 COMP_IDX  = slice(0,   50)   # compressor_power_kw
 PRES_IDX  = slice(50,  100)  # discharge_pressure_psi
 FAN_IDX   = slice(100, 150)  # fan_rpm
@@ -52,9 +52,9 @@ class SHAPExplainer:
     """
     SHAP GradientExplainer wrapper for the Thermo-Twin HVAC autoencoder.
 
-    Decomposes each window's reconstruction error into contributions from
-    compressor power, discharge pressure, fan RPM, and supply air temp.
-    Applies prescriptive rules to identify fault type and recommended action.
+    Uses 200 normal background windows (fixed seed=42) for deterministic,
+    reproducible SHAP values across runs. Decomposes each window's
+    reconstruction error into contributions from the 4 sensor streams.
 
     Usage:
         explainer = SHAPExplainer(checkpoint_path, X_train_normal)
@@ -74,7 +74,7 @@ class SHAPExplainer:
         self,
         checkpoint_path: Union[str, Path],
         background_data: np.ndarray,
-        n_background: int = 150,
+        n_background: int = 200,
     ):
         import shap
 
@@ -91,14 +91,14 @@ class SHAPExplainer:
 
         self._explainer = shap.GradientExplainer(self._wrapper, bg)
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # -- Public API ------------------------------------------------------------
 
     def explain(self, window: np.ndarray) -> dict:
         """
         Explain a single sensor window.
 
         Args:
-            window: shape (200,) or (1, 200) — scaled sensor window
+            window: shape (200,) or (1, 200) -- scaled sensor window
 
         Returns:
             dict with per-stream percentages, summary, fault_type, prescription
@@ -113,7 +113,7 @@ class SHAPExplainer:
         sv_all = self._raw_shap(windows)  # (N, 200)
         return [self._attribution(sv) for sv in sv_all]
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # -- Internal helpers ------------------------------------------------------
 
     def _raw_shap(self, windows: np.ndarray) -> np.ndarray:
         """Run GradientExplainer and return SHAP values, shape (N, 200)."""
@@ -162,18 +162,18 @@ class SHAPExplainer:
         }
 
 
-# ─── Prescriptive rules ───────────────────────────────────────────────────────
+# -- Prescriptive rules --------------------------------------------------------
 
 def _prescriptive_rules(comp_pct: float, pres_pct: float,
                         fan_pct: float, temp_pct: float) -> tuple:
     """
     Map SHAP attribution percentages to a fault type and maintenance prescription.
-    Rules calibrated against observed SHAP patterns — evaluated in priority order.
+    Rules calibrated against observed SHAP patterns -- evaluated in priority order.
 
     Observed SHAP fingerprints (from training data):
-      Refrigerant Leak  → supply_air_temp dominant (gas escapes, unit stops cooling)
-      Fan Failure       → fan_rpm dominant, compressor secondary
-      Compressor Wear   → compressor_power dominant, temp secondary
+      Refrigerant Leak  -> supply_air_temp dominant (gas escapes, unit stops cooling)
+      Fan Failure       -> fan_rpm dominant, compressor secondary
+      Compressor Wear   -> compressor_power dominant, temp secondary
     """
     # Refrigerant Leak: temp rise is the dominant thermodynamic signal
     if temp_pct > 50:
@@ -219,8 +219,8 @@ def _prescriptive_rules(comp_pct: float, pres_pct: float,
     return (
         "Unknown Fault",
         {
-            "fault":  f"Unclassified anomaly — dominant signal: {dominant[0]}",
-            "impact": "Unknown — manual inspection required",
+            "fault":  f"Unclassified anomaly -- dominant signal: {dominant[0]}",
+            "impact": "Unknown -- manual inspection required",
             "action": "Dispatch technician for on-site diagnostics",
         },
     )

@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import Patch
+from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -157,7 +158,7 @@ counts = df["fault_label"].value_counts()
 for lbl in ("refrigerant_leak", "fan_failure", "compressor_wear"):
     assert counts.get(lbl, 0) >= 100, f"Only {counts.get(lbl, 0)} samples for {lbl}"
 
-csv_path = "synthetic_data.csv"
+csv_path = Path(__file__).parent / "synthetic_data.csv"
 df.to_csv(csv_path, index=False)
 print(f"Saved {len(df):,} rows -> {csv_path}")
 print("\nFault label distribution:")

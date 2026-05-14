@@ -1,5 +1,5 @@
-"""
-Phase 5 — Thermo-Twin Alert Backend
+﻿"""
+Phase 5 - Thermo-Twin Alert Backend
 Flask API that receives anomaly alerts, stores them in memory,
 and serves them to the dashboard.
 
@@ -7,10 +7,10 @@ Run:
     python backend/app.py
 
 Endpoints:
-    GET  /health                    — healthcheck
-    POST /alert                     — receive an alert from inference layer
-    GET  /alerts                    — return last 50 alerts, newest first
-    POST /demo/<scenario>           — trigger a pre-loaded demo scenario
+    GET  /health                    - healthcheck (includes dynamic threshold status)
+    POST /alert                     - receive an alert from inference layer
+    GET  /alerts                    - return last 50 alerts, newest first
+    POST /demo/<scenario>           - trigger a pre-loaded demo scenario
 """
 
 import sys
@@ -25,12 +25,14 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from explainability.alert_payload import build_alert_payload
+from model.threshold import ThresholdManager
 
-# ─── Config ───────────────────────────────────────────────────────────────────
+# --- Config ---
 
-DEMO_JSON    = ROOT / "explainability" / "demo_explanations.json"
-MAX_HISTORY  = 50
-PORT         = 5000
+DEMO_JSON       = ROOT / "explainability" / "demo_explanations.json"
+THRESHOLD_STATE = ROOT / "model" / "checkpoints" / "threshold_state.json"
+MAX_HISTORY     = 50
+PORT            = 5000
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,21 +41,28 @@ logging.basicConfig(
 )
 log = logging.getLogger("thermo-twin")
 
-# ─── App setup ────────────────────────────────────────────────────────────────
+# --- App setup ---
 
 app = Flask(__name__)
 CORS(app)
 
-# ─── In-memory state ──────────────────────────────────────────────────────────
+# --- In-memory state ---
 
-alert_history: list = []
+alert_history = []
 
-# Load demo scenarios once at startup — never reload from disk per request
-demo_scenarios: dict = {}
+threshold_mgr = ThresholdManager(state_path=THRESHOLD_STATE)
+log.info(
+    "ThresholdManager ready - threshold=%.4f  buffer=%d/%d  dynamic=%s",
+    threshold_mgr.get_threshold(),
+    threshold_mgr.buffer_size,
+    ThresholdManager.BUFFER_MAX,
+    threshold_mgr.is_dynamic,
+)
+
+demo_scenarios = {}
 if DEMO_JSON.exists():
     with open(DEMO_JSON) as f:
         _raw = json.load(f)
-    # Build full alert payloads for each scenario now so /demo is instant
     _machine_map = {
         "scenario_1_refrigerant_leak": "CARRIER-CHILLER-01",
         "scenario_2_fan_failure":      "CARRIER-CHILLER-01",
@@ -67,42 +76,54 @@ if DEMO_JSON.exists():
         )
     log.info("Loaded %d demo scenarios from %s", len(demo_scenarios), DEMO_JSON.name)
 else:
-    log.warning("demo_explanations.json not found — /demo endpoints will return 404")
+    log.warning("demo_explanations.json not found - /demo endpoints will return 404")
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# --- Helpers ---
 
-def _now_iso() -> str:
+def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _append_alert(payload: dict) -> None:
-    """Append to history, evicting oldest entry when at capacity."""
+def _append_alert(payload):
     if len(alert_history) >= MAX_HISTORY:
         alert_history.pop(0)
     alert_history.append(payload)
+    recon_err = payload.get("reconstruction_error")
+    sev       = payload.get("severity_score", 100)
+    if recon_err is not None:
+        threshold_mgr.update(recon_err, sev)
+        log.info(
+            "Threshold updated - current=%.4f  buffer=%d  dynamic=%s",
+            threshold_mgr.get_threshold(),
+            threshold_mgr.buffer_size,
+            threshold_mgr.is_dynamic,
+        )
 
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
+# --- Routes ---
 
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok", "service": "Thermo-Twin Alert Backend"}), 200
+    return jsonify({
+        "status":         "ok",
+        "service":        "Thermo-Twin Alert Backend",
+        "threshold":      round(threshold_mgr.get_threshold(), 6),
+        "threshold_mode": "dynamic" if threshold_mgr.is_dynamic else "static_fallback",
+        "buffer_size":    threshold_mgr.buffer_size,
+    }), 200
 
 
 @app.post("/alert")
 def receive_alert():
-    """Receive a JSON alert payload from the inference layer."""
     if not request.is_json:
-        log.warning("POST /alert — non-JSON body rejected")
+        log.warning("POST /alert - non-JSON body rejected")
         return jsonify({"error": "Content-Type must be application/json"}), 400
-
     try:
         payload = request.get_json(force=True)
     except Exception as exc:
-        log.error("POST /alert — JSON parse error: %s", exc)
+        log.error("POST /alert - JSON parse error: %s", exc)
         return jsonify({"error": "invalid JSON"}), 400
-
     payload["received_at"] = _now_iso()
     _append_alert(payload)
     log.info(
@@ -116,19 +137,16 @@ def receive_alert():
 
 @app.get("/alerts")
 def get_alerts():
-    """Return last 50 alerts, newest first."""
     newest_first = list(reversed(alert_history))
     return jsonify({"alerts": newest_first, "count": len(newest_first)}), 200
 
 
 @app.post("/demo/<scenario>")
-def trigger_demo(scenario: str):
-    """Trigger a pre-loaded demo scenario by name."""
+def trigger_demo(scenario):
     if scenario not in demo_scenarios:
-        log.warning("POST /demo/%s — unknown scenario", scenario)
+        log.warning("POST /demo/%s - unknown scenario", scenario)
         return jsonify({"error": "unknown scenario"}), 404
-
-    payload = dict(demo_scenarios[scenario])   # shallow copy so original stays clean
+    payload = dict(demo_scenarios[scenario])
     payload["received_at"] = _now_iso()
     _append_alert(payload)
     log.info(
@@ -140,7 +158,7 @@ def trigger_demo(scenario: str):
     return jsonify({"status": "triggered", "scenario": scenario}), 200
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point ---
 
 if __name__ == "__main__":
     log.info("Starting Thermo-Twin Alert Backend on port %d", PORT)
