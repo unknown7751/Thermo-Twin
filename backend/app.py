@@ -1,4 +1,4 @@
-﻿"""
+"""
 Phase 5 - Thermo-Twin Alert Backend
 Flask API that receives anomaly alerts, stores them in memory,
 and serves them to the dashboard.
@@ -16,9 +16,10 @@ Endpoints:
 import sys
 import json
 import logging
+import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 ROOT = Path(__file__).parent.parent
@@ -49,6 +50,48 @@ CORS(app)
 # --- In-memory state ---
 
 alert_history = []
+
+# Signal state (for the HTML dashboard chart)
+def _make_normal_signal(n=200, seed=7):
+    rng    = np.random.default_rng(seed)
+    t      = np.arange(n)
+    demand = 0.4 * np.sin(2 * np.pi * 0.02 * t) + 0.15 * np.sin(2 * np.pi * 0.007 * t)
+    comp   = np.clip(3.5 + demand + rng.normal(0, 0.08, n), 2.0, 6.0)
+    return {
+        "compressor_power_kw":    comp.tolist(),
+        "discharge_pressure_psi": (70.0 * comp + rng.normal(0, 4, n)).tolist(),
+        "fan_rpm":                (340.0 * comp + rng.normal(0, 30, n)).tolist(),
+        "supply_air_temp_c":      (18.0 - 2.0 * comp + rng.normal(0, 0.3, n)).tolist(),
+    }
+
+def _make_fault_signal(scenario, n=70):
+    rng  = np.random.default_rng(99)
+    comp = np.clip(3.5 + rng.normal(0, 0.08, n), 2.0, 6.0)
+    disc = 70.0 * comp + rng.normal(0, 4, n)
+    fan  = 340.0 * comp + rng.normal(0, 30, n)
+    temp = 18.0 - 2.0 * comp + rng.normal(0, 0.3, n)
+    if "refrigerant" in scenario:
+        disc -= disc.mean() * 0.40
+        temp += 7.0
+    elif "fan" in scenario:
+        ramp  = np.linspace(0, 1, n)
+        fan  -= fan.mean() * 0.80
+        comp  = comp + ramp * 1.5
+        disc  = disc + ramp * 60.0
+        temp  = temp + ramp * 4.0
+    elif "compressor" in scenario:
+        ramp  = np.linspace(0, 1, n)
+        comp  = comp + ramp * 1.8
+        disc  = disc - ramp * 50.0
+        temp  = temp + ramp * 3.5
+    return {
+        "compressor_power_kw":    comp.tolist(),
+        "discharge_pressure_psi": disc.tolist(),
+        "fan_rpm":                fan.tolist(),
+        "supply_air_temp_c":      temp.tolist(),
+    }
+
+_chart_state = {"signal": _make_normal_signal(), "fault_at": None}
 
 threshold_mgr = ThresholdManager(state_path=THRESHOLD_STATE)
 log.info(
@@ -141,6 +184,29 @@ def get_alerts():
     return jsonify({"alerts": newest_first, "count": len(newest_first)}), 200
 
 
+@app.get("/")
+@app.get("/dashboard")
+def serve_dashboard():
+    dash_dir = str(ROOT / "dashboard")
+    return send_from_directory(dash_dir, "index.html")
+
+
+@app.get("/signal")
+def get_signal():
+    return jsonify({"signal": _chart_state["signal"], "fault_at": _chart_state["fault_at"]}), 200
+
+
+@app.get("/baselines")
+def get_baselines():
+    bl_dir = ROOT / "model" / "checkpoints" / "unit_baselines"
+    result = []
+    if bl_dir.exists():
+        for f in sorted(bl_dir.glob("*.json")):
+            with open(f) as fp:
+                result.append(json.load(fp))
+    return jsonify({"baselines": result}), 200
+
+
 @app.post("/demo/<scenario>")
 def trigger_demo(scenario):
     if scenario not in demo_scenarios:
@@ -149,6 +215,16 @@ def trigger_demo(scenario):
     payload = dict(demo_scenarios[scenario])
     payload["received_at"] = _now_iso()
     _append_alert(payload)
+
+    # Append fault signal to chart state and keep last 350 samples
+    fault_sig = _make_fault_signal(scenario)
+    fault_len = len(fault_sig["compressor_power_kw"])
+    for col in _chart_state["signal"]:
+        combined = _chart_state["signal"][col] + fault_sig[col]
+        _chart_state["signal"][col] = combined[-350:]
+    sig_len = len(_chart_state["signal"]["compressor_power_kw"])
+    _chart_state["fault_at"] = sig_len - fault_len
+
     log.info(
         "Demo triggered  scenario=%s  severity=%s  fault=%s",
         scenario,

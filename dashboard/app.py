@@ -75,6 +75,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# -- Kill fragment fade (MutationObserver forces opacity:1 on every DOM change) -
+import streamlit.components.v1 as _components
+_components.html("""
+<script>
+(function() {
+  function killFade() {
+    document.querySelectorAll(
+      '[data-testid="stVerticalBlock"], [data-testid="stVerticalBlock"] *'
+    ).forEach(function(el) {
+      el.style.setProperty('opacity',    '1',    'important');
+      el.style.setProperty('animation',  'none', 'important');
+      el.style.setProperty('transition', 'none', 'important');
+    });
+  }
+  var obs = new MutationObserver(killFade);
+  obs.observe(document.body, { childList: true, subtree: true, attributes: true });
+  killFade();
+})();
+</script>
+""", height=0)
+
 # -- Signal simulation ---------------------------------------------------------
 
 # Per-stream ranges for 0-1 normalisation (for chart clarity)
