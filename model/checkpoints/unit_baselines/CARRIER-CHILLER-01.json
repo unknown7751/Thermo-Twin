@@ -1,0 +1,8 @@
+{
+  "machine_id": "CARRIER-CHILLER-01",
+  "k_disc": 69.9869,
+  "k_fan": 340.1865,
+  "k_temp_b": -2.0149,
+  "k_temp_a": 18.051,
+  "n_samples": 7168
+}

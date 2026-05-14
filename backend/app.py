@@ -1,5 +1,5 @@
 """
-Phase 5 — Thermo-Twin Alert Backend
+Phase 5 - Thermo-Twin Alert Backend
 Flask API that receives anomaly alerts, stores them in memory,
 and serves them to the dashboard.
 
@@ -7,30 +7,33 @@ Run:
     python backend/app.py
 
 Endpoints:
-    GET  /health                    — healthcheck
-    POST /alert                     — receive an alert from inference layer
-    GET  /alerts                    — return last 50 alerts, newest first
-    POST /demo/<scenario>           — trigger a pre-loaded demo scenario
+    GET  /health                    - healthcheck (includes dynamic threshold status)
+    POST /alert                     - receive an alert from inference layer
+    GET  /alerts                    - return last 50 alerts, newest first
+    POST /demo/<scenario>           - trigger a pre-loaded demo scenario
 """
 
 import sys
 import json
 import logging
+import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from explainability.alert_payload import build_alert_payload
+from model.threshold import ThresholdManager
 
-# ─── Config ───────────────────────────────────────────────────────────────────
+# --- Config ---
 
-DEMO_JSON    = ROOT / "explainability" / "demo_explanations.json"
-MAX_HISTORY  = 50
-PORT         = 5000
+DEMO_JSON       = ROOT / "explainability" / "demo_explanations.json"
+THRESHOLD_STATE = ROOT / "model" / "checkpoints" / "threshold_state.json"
+MAX_HISTORY     = 50
+PORT            = 5000
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,21 +42,70 @@ logging.basicConfig(
 )
 log = logging.getLogger("thermo-twin")
 
-# ─── App setup ────────────────────────────────────────────────────────────────
+# --- App setup ---
 
 app = Flask(__name__)
 CORS(app)
 
-# ─── In-memory state ──────────────────────────────────────────────────────────
+# --- In-memory state ---
 
-alert_history: list = []
+alert_history = []
 
-# Load demo scenarios once at startup — never reload from disk per request
-demo_scenarios: dict = {}
+# Signal state (for the HTML dashboard chart)
+def _make_normal_signal(n=200, seed=7):
+    rng    = np.random.default_rng(seed)
+    t      = np.arange(n)
+    demand = 0.4 * np.sin(2 * np.pi * 0.02 * t) + 0.15 * np.sin(2 * np.pi * 0.007 * t)
+    comp   = np.clip(3.5 + demand + rng.normal(0, 0.08, n), 2.0, 6.0)
+    return {
+        "compressor_power_kw":    comp.tolist(),
+        "discharge_pressure_psi": (70.0 * comp + rng.normal(0, 4, n)).tolist(),
+        "fan_rpm":                (340.0 * comp + rng.normal(0, 30, n)).tolist(),
+        "supply_air_temp_c":      (18.0 - 2.0 * comp + rng.normal(0, 0.3, n)).tolist(),
+    }
+
+def _make_fault_signal(scenario, n=70):
+    rng  = np.random.default_rng(99)
+    comp = np.clip(3.5 + rng.normal(0, 0.08, n), 2.0, 6.0)
+    disc = 70.0 * comp + rng.normal(0, 4, n)
+    fan  = 340.0 * comp + rng.normal(0, 30, n)
+    temp = 18.0 - 2.0 * comp + rng.normal(0, 0.3, n)
+    if "refrigerant" in scenario:
+        disc -= disc.mean() * 0.40
+        temp += 7.0
+    elif "fan" in scenario:
+        ramp  = np.linspace(0, 1, n)
+        fan  -= fan.mean() * 0.80
+        comp  = comp + ramp * 1.5
+        disc  = disc + ramp * 60.0
+        temp  = temp + ramp * 4.0
+    elif "compressor" in scenario:
+        ramp  = np.linspace(0, 1, n)
+        comp  = comp + ramp * 1.8
+        disc  = disc - ramp * 50.0
+        temp  = temp + ramp * 3.5
+    return {
+        "compressor_power_kw":    comp.tolist(),
+        "discharge_pressure_psi": disc.tolist(),
+        "fan_rpm":                fan.tolist(),
+        "supply_air_temp_c":      temp.tolist(),
+    }
+
+_chart_state = {"signal": _make_normal_signal(), "fault_at": None}
+
+threshold_mgr = ThresholdManager(state_path=THRESHOLD_STATE)
+log.info(
+    "ThresholdManager ready - threshold=%.4f  buffer=%d/%d  dynamic=%s",
+    threshold_mgr.get_threshold(),
+    threshold_mgr.buffer_size,
+    ThresholdManager.BUFFER_MAX,
+    threshold_mgr.is_dynamic,
+)
+
+demo_scenarios = {}
 if DEMO_JSON.exists():
     with open(DEMO_JSON) as f:
         _raw = json.load(f)
-    # Build full alert payloads for each scenario now so /demo is instant
     _machine_map = {
         "scenario_1_refrigerant_leak": "CARRIER-CHILLER-01",
         "scenario_2_fan_failure":      "CARRIER-CHILLER-01",
@@ -67,42 +119,54 @@ if DEMO_JSON.exists():
         )
     log.info("Loaded %d demo scenarios from %s", len(demo_scenarios), DEMO_JSON.name)
 else:
-    log.warning("demo_explanations.json not found — /demo endpoints will return 404")
+    log.warning("demo_explanations.json not found - /demo endpoints will return 404")
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# --- Helpers ---
 
-def _now_iso() -> str:
+def _now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _append_alert(payload: dict) -> None:
-    """Append to history, evicting oldest entry when at capacity."""
+def _append_alert(payload):
     if len(alert_history) >= MAX_HISTORY:
         alert_history.pop(0)
     alert_history.append(payload)
+    recon_err = payload.get("reconstruction_error")
+    sev       = payload.get("severity_score", 100)
+    if recon_err is not None:
+        threshold_mgr.update(recon_err, sev)
+        log.info(
+            "Threshold updated - current=%.4f  buffer=%d  dynamic=%s",
+            threshold_mgr.get_threshold(),
+            threshold_mgr.buffer_size,
+            threshold_mgr.is_dynamic,
+        )
 
 
-# ─── Routes ───────────────────────────────────────────────────────────────────
+# --- Routes ---
 
 @app.get("/health")
 def health():
-    return jsonify({"status": "ok", "service": "Thermo-Twin Alert Backend"}), 200
+    return jsonify({
+        "status":         "ok",
+        "service":        "Thermo-Twin Alert Backend",
+        "threshold":      round(threshold_mgr.get_threshold(), 6),
+        "threshold_mode": "dynamic" if threshold_mgr.is_dynamic else "static_fallback",
+        "buffer_size":    threshold_mgr.buffer_size,
+    }), 200
 
 
 @app.post("/alert")
 def receive_alert():
-    """Receive a JSON alert payload from the inference layer."""
     if not request.is_json:
-        log.warning("POST /alert — non-JSON body rejected")
+        log.warning("POST /alert - non-JSON body rejected")
         return jsonify({"error": "Content-Type must be application/json"}), 400
-
     try:
         payload = request.get_json(force=True)
     except Exception as exc:
-        log.error("POST /alert — JSON parse error: %s", exc)
+        log.error("POST /alert - JSON parse error: %s", exc)
         return jsonify({"error": "invalid JSON"}), 400
-
     payload["received_at"] = _now_iso()
     _append_alert(payload)
     log.info(
@@ -116,21 +180,51 @@ def receive_alert():
 
 @app.get("/alerts")
 def get_alerts():
-    """Return last 50 alerts, newest first."""
     newest_first = list(reversed(alert_history))
     return jsonify({"alerts": newest_first, "count": len(newest_first)}), 200
 
 
-@app.post("/demo/<scenario>")
-def trigger_demo(scenario: str):
-    """Trigger a pre-loaded demo scenario by name."""
-    if scenario not in demo_scenarios:
-        log.warning("POST /demo/%s — unknown scenario", scenario)
-        return jsonify({"error": "unknown scenario"}), 404
+@app.get("/")
+@app.get("/dashboard")
+def serve_dashboard():
+    dash_dir = str(ROOT / "dashboard")
+    return send_from_directory(dash_dir, "index.html")
 
-    payload = dict(demo_scenarios[scenario])   # shallow copy so original stays clean
+
+@app.get("/signal")
+def get_signal():
+    return jsonify({"signal": _chart_state["signal"], "fault_at": _chart_state["fault_at"]}), 200
+
+
+@app.get("/baselines")
+def get_baselines():
+    bl_dir = ROOT / "model" / "checkpoints" / "unit_baselines"
+    result = []
+    if bl_dir.exists():
+        for f in sorted(bl_dir.glob("*.json")):
+            with open(f) as fp:
+                result.append(json.load(fp))
+    return jsonify({"baselines": result}), 200
+
+
+@app.post("/demo/<scenario>")
+def trigger_demo(scenario):
+    if scenario not in demo_scenarios:
+        log.warning("POST /demo/%s - unknown scenario", scenario)
+        return jsonify({"error": "unknown scenario"}), 404
+    payload = dict(demo_scenarios[scenario])
     payload["received_at"] = _now_iso()
     _append_alert(payload)
+
+    # Append fault signal to chart state and keep last 350 samples
+    fault_sig = _make_fault_signal(scenario)
+    fault_len = len(fault_sig["compressor_power_kw"])
+    for col in _chart_state["signal"]:
+        combined = _chart_state["signal"][col] + fault_sig[col]
+        _chart_state["signal"][col] = combined[-350:]
+    sig_len = len(_chart_state["signal"]["compressor_power_kw"])
+    _chart_state["fault_at"] = sig_len - fault_len
+
     log.info(
         "Demo triggered  scenario=%s  severity=%s  fault=%s",
         scenario,
@@ -140,7 +234,7 @@ def trigger_demo(scenario: str):
     return jsonify({"status": "triggered", "scenario": scenario}), 200
 
 
-# ─── Entry point ──────────────────────────────────────────────────────────────
+# --- Entry point ---
 
 if __name__ == "__main__":
     log.info("Starting Thermo-Twin Alert Backend on port %d", PORT)

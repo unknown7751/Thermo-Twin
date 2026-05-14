@@ -1,0 +1,8 @@
+{
+  "machine_id": "CARRIER-VRF-UNIT-01",
+  "k_disc": 69.9937,
+  "k_fan": 340.1567,
+  "k_temp_b": -2.0119,
+  "k_temp_a": 18.0459,
+  "n_samples": 6979
+}
