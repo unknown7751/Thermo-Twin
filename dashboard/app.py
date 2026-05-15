@@ -510,30 +510,36 @@ def _live_panel():
               <div style="font-size:1.05rem;font-weight:800;color:#E6EDF3;margin-bottom:.9rem">
                 💰&nbsp; Energy Cost Impact
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem">
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.8rem">
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Efficiency Loss</div>
                   <div style="font-size:1.1rem;font-weight:700;color:#F44336">{eff_loss}%</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Cooling capacity lost due to this fault</div>
                 </div>
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Wasted Energy</div>
                   <div style="font-size:1.1rem;font-weight:700;color:#FF9800">{kwh} kWh/hr</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Extra electricity consumed every hour</div>
                 </div>
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Payback Period</div>
                   <div style="font-size:1.1rem;font-weight:700;color:#4CAF50">{payback} days</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Days of energy savings to recover part cost</div>
                 </div>
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost Today</div>
-                  <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_day:,.0f} / ${usd_day}</div>
+                  <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_day:,.0f}</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Money lost today by not fixing the fault</div>
                 </div>
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Cost This Month</div>
                   <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">&#8377;{inr_mon:,.0f}</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Projected loss if fault goes unrepaired</div>
                 </div>
                 <div>
                   <div style="font-size:.7rem;font-weight:700;letter-spacing:1.5px;color:#8B949E;text-transform:uppercase">Fix Cost (Part)</div>
                   <div style="font-size:1.1rem;font-weight:700;color:#E6EDF3">~&#8377;{part:,}</div>
+                  <div style="font-size:.68rem;color:#6B737D;margin-top:.15rem">Estimated cost of the replacement part</div>
                 </div>
               </div>
             </div>
