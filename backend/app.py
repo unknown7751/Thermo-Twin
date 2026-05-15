@@ -27,6 +27,9 @@ sys.path.insert(0, str(ROOT))
 
 from explainability.alert_payload import build_alert_payload
 from model.threshold import ThresholdManager
+from data_streamer import SyntheticDataStreamer
+from fault_injector import FaultInjector
+from live_detector import LiveDetector
 
 # --- Config ---
 
@@ -94,6 +97,14 @@ def _make_fault_signal(scenario, n=70):
 _chart_state = {"signal": _make_normal_signal(), "fault_at": None}
 
 threshold_mgr = ThresholdManager(state_path=THRESHOLD_STATE)
+
+live_streamer = SyntheticDataStreamer()
+live_injector = FaultInjector(live_streamer)
+live_detector = LiveDetector(
+    str(ROOT / "model" / "checkpoints" / "autoencoder.pt"),
+    str(ROOT / "model" / "checkpoints" / "threshold_config.json"),
+    str(ROOT / "data" / "processed" / "scaler.pkl"),
+)
 log.info(
     "ThresholdManager ready - threshold=%.4f  buffer=%d/%d  dynamic=%s",
     threshold_mgr.get_threshold(),
@@ -234,9 +245,64 @@ def trigger_demo(scenario):
     return jsonify({"status": "triggered", "scenario": scenario}), 200
 
 
+# --- Live streaming routes ---
+
+@app.get("/live")
+def serve_live_demo():
+    dash_dir = str(ROOT / "dashboard")
+    return send_from_directory(dash_dir, "live_demo.html")
+
+
+@app.get("/stream/next-sample")
+def stream_next_sample():
+    sample = live_streamer.get_next_sample()
+    live_injector.apply_to_live_sample(sample)   # modifies sample in-place if in fault window
+    history = list(live_streamer.history)
+    alert   = live_detector.process_from_history(history)
+    return jsonify({
+        "sample":           sample,
+        "alert":            alert,
+        "current_time":     live_streamer.current_time,
+        "buffer_size":      len(live_streamer.history),
+        "scheduled_faults": live_injector.get_scheduled_faults(),
+    }), 200
+
+
+@app.get("/stream/full-history")
+def stream_full_history():
+    return jsonify(live_streamer.get_history_dict()), 200
+
+
+@app.post("/stream/inject-fault/<fault_type>")
+def inject_fault(fault_type):
+    valid = {"refrigerant_leak", "fan_failure", "compressor_wear"}
+    if fault_type not in valid:
+        return jsonify({"error": f"Invalid fault type: {fault_type}"}), 400
+    body     = request.get_json(silent=True) or {}
+    delay    = body.get("delay", 10)       # seconds until fault starts
+    duration = body.get("duration", 10)    # seconds the fault lasts
+    fault_info = live_injector.schedule_future_fault(fault_type, delay, duration)
+    return jsonify({
+        "status":     "fault_scheduled",
+        "fault_info": fault_info,
+        "message":    f"Fault '{fault_type}' will start at t={fault_info['start_time']:.1f}s",
+    }), 200
+
+
+@app.get("/stream/detection-history")
+def stream_detection_history():
+    return jsonify({"detections": live_detector.get_detection_history()}), 200
+
+
+@app.post("/stream/reset")
+def stream_reset():
+    live_detector.reset()
+    return jsonify({"status": "detector_reset"}), 200
+
+
 # --- Entry point ---
 
 if __name__ == "__main__":
     log.info("Starting Thermo-Twin Alert Backend on port %d", PORT)
     log.info("Demo scenarios loaded: %s", list(demo_scenarios.keys()))
-    app.run(host="0.0.0.0", port=PORT, debug=False)
+    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

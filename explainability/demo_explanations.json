@@ -1,10 +1,10 @@
 {
   "scenario_1_refrigerant_leak": {
-    "compressor_power_pct": 1.7,
-    "discharge_pressure_pct": 1.3,
-    "fan_rpm_pct": 1.9,
-    "supply_air_temp_pct": 95.1,
-    "summary": "Anomaly driven primarily by Temp Rise (95%)",
+    "compressor_power_pct": 3.2,
+    "discharge_pressure_pct": 2.0,
+    "fan_rpm_pct": 3.0,
+    "supply_air_temp_pct": 91.8,
+    "summary": "Anomaly driven primarily by Temp Rise (92%)",
     "fault_type": "Refrigerant Leak",
     "prescription": {
       "fault": "Refrigerant Leak in Evaporator Coil",
@@ -29,11 +29,11 @@
     ]
   },
   "scenario_2_fan_failure": {
-    "compressor_power_pct": 32.9,
-    "discharge_pressure_pct": 11.2,
-    "fan_rpm_pct": 43.0,
-    "supply_air_temp_pct": 12.9,
-    "summary": "Anomaly driven by Fan RPM (43%) and Compressor Power (33%)",
+    "compressor_power_pct": 26.2,
+    "discharge_pressure_pct": 9.1,
+    "fan_rpm_pct": 47.5,
+    "supply_air_temp_pct": 17.2,
+    "summary": "Anomaly driven by Fan RPM (48%) and Compressor Power (26%)",
     "fault_type": "Condenser Fan Failure",
     "prescription": {
       "fault": "Condenser Fan Motor Degradation or Failure",
@@ -58,10 +58,10 @@
     ]
   },
   "scenario_3_compressor_wear": {
-    "compressor_power_pct": 59.2,
-    "discharge_pressure_pct": 7.7,
+    "compressor_power_pct": 59.0,
+    "discharge_pressure_pct": 7.8,
     "fan_rpm_pct": 0.7,
-    "supply_air_temp_pct": 32.4,
+    "supply_air_temp_pct": 32.5,
     "summary": "Anomaly driven by Compressor Power (59%) and Temp Rise (32%)",
     "fault_type": "Compressor Wear",
     "prescription": {
