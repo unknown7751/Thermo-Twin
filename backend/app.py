@@ -354,6 +354,7 @@ def stream_next_sample():
         "current_time":     live_streamer.current_time,
         "buffer_size":      len(live_streamer.history),
         "scheduled_faults": live_injector.get_scheduled_faults(),
+        "twin":             _last_twin_state if _twin_engine else None,
     }), 200
 
 

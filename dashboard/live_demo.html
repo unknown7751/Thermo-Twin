@@ -161,6 +161,47 @@
     .shap-bar-fill.dominant { background: #DC2626; }
     .shap-pct { width: 44px; font-size: 12px; color: #60A5FA; text-align: right; font-family: monospace; }
 
+    /* ── Digital Twin panel ── */
+    .twin-panel {
+      background: #111827; border: 1px solid #1E3A5F;
+      border-radius: 10px; padding: 18px; margin-bottom: 24px;
+    }
+    .twin-panel h3 {
+      font-size: 12px; color: #64748B; text-transform: uppercase;
+      letter-spacing: 0.8px; margin-bottom: 4px;
+      border-bottom: 1px solid #1E3A5F; padding-bottom: 10px;
+    }
+    .twin-mode-badge {
+      display: inline-block; font-size: 10px; padding: 2px 8px;
+      border-radius: 999px; font-family: monospace; margin-bottom: 14px;
+      background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.4);
+      color: #93C5FD;
+    }
+    .twin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .twin-section-title {
+      font-size: 11px; color: #475569; text-transform: uppercase;
+      letter-spacing: 0.7px; margin-bottom: 10px;
+    }
+    .health-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .health-label { width: 170px; font-size: 12px; color: #94A3B8; flex-shrink: 0; }
+    .health-bar-bg { flex: 1; height: 10px; background: #1E3A5F; border-radius: 5px; overflow: hidden; }
+    .health-bar-fill {
+      height: 100%; border-radius: 5px;
+      background: linear-gradient(90deg, #22C55E, #86EFAC);
+      transition: width 0.6s cubic-bezier(.4,0,.2,1), background 0.4s;
+    }
+    .health-bar-fill.warn  { background: linear-gradient(90deg, #F59E0B, #FCD34D); }
+    .health-bar-fill.crit  { background: linear-gradient(90deg, #DC2626, #FCA5A5); }
+    .health-pct { width: 48px; font-size: 12px; text-align: right; font-family: monospace; color: #60A5FA; }
+
+    .diverg-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #1E3A5F; }
+    .diverg-row:last-child { border-bottom: none; }
+    .diverg-name { font-size: 12px; color: #94A3B8; }
+    .diverg-val  { font-size: 13px; font-family: monospace; font-weight: 700; }
+    .diverg-val.pos { color: #FCA5A5; }
+    .diverg-val.neg { color: #86EFAC; }
+    .diverg-val.neutral { color: #64748B; }
+
     /* ── Alert log ── */
     .alert-panel {
       background: #111827; border: 1px solid #1E3A5F;
@@ -278,6 +319,52 @@
       <div class="shap-pct" id="pctTemp">25%</div>
     </div>
     <div id="shapSummary" style="font-size:12px;color:#94A3B8;margin-top:10px;"></div>
+  </div>
+
+  <!-- Digital Twin State Panel -->
+  <div class="twin-panel" id="twinPanel">
+    <h3>Digital Twin &mdash; Physics State Estimator
+      <span class="twin-mode-badge" id="twinModeBadge">ukf</span>
+    </h3>
+    <div class="twin-grid">
+      <div>
+        <div class="twin-section-title">Component Health</div>
+        <div class="health-row">
+          <div class="health-label">Refrigerant Charge</div>
+          <div class="health-bar-bg"><div class="health-bar-fill" id="barRefrig" style="width:100%"></div></div>
+          <div class="health-pct" id="pctRefrig">100%</div>
+        </div>
+        <div class="health-row">
+          <div class="health-label">Compressor Efficiency</div>
+          <div class="health-bar-bg"><div class="health-bar-fill" id="barCompEff" style="width:100%"></div></div>
+          <div class="health-pct" id="pctCompEff">100%</div>
+        </div>
+        <div class="health-row">
+          <div class="health-label">Fan Health</div>
+          <div class="health-bar-bg"><div class="health-bar-fill" id="barFanH" style="width:100%"></div></div>
+          <div class="health-pct" id="pctFanH">100%</div>
+        </div>
+      </div>
+      <div>
+        <div class="twin-section-title">Sensor Divergence (Real &minus; Predicted)</div>
+        <div class="diverg-row">
+          <div class="diverg-name">Compressor Power (kW)</div>
+          <div class="diverg-val neutral" id="divPower">—</div>
+        </div>
+        <div class="diverg-row">
+          <div class="diverg-name">Discharge Pressure (PSI)</div>
+          <div class="diverg-val neutral" id="divPressure">—</div>
+        </div>
+        <div class="diverg-row">
+          <div class="diverg-name">Fan RPM</div>
+          <div class="diverg-val neutral" id="divRpm">—</div>
+        </div>
+        <div class="diverg-row">
+          <div class="diverg-name">Supply Air Temp (°C)</div>
+          <div class="diverg-val neutral" id="divTemp">—</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="alert-panel">
@@ -473,6 +560,58 @@ function clearCountdown() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Digital Twin panel
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function updateTwinPanel(twin) {
+  const st = twin.state || {};
+  const dv = twin.divergence || {};
+  const mode = twin.estimator_mode || 'ukf';
+
+  // Mode badge
+  const badge = document.getElementById('twinModeBadge');
+  badge.textContent = mode;
+  badge.style.background = mode === 'ukf'
+    ? 'rgba(59,130,246,0.15)' : 'rgba(100,116,139,0.15)';
+  badge.style.borderColor = mode === 'ukf'
+    ? 'rgba(59,130,246,0.4)'  : 'rgba(100,116,139,0.4)';
+
+  // Health bars
+  setHealthBar('barRefrig',  'pctRefrig',  st.refrigerant_charge_pct);
+  setHealthBar('barCompEff', 'pctCompEff', st.compressor_efficiency_pct);
+  setHealthBar('barFanH',    'pctFanH',    st.fan_health_pct);
+
+  // Divergence values
+  setDivergVal('divPower',    dv.compressor_power_kw,    2);
+  setDivergVal('divPressure', dv.discharge_pressure_psi, 1);
+  setDivergVal('divRpm',      dv.fan_rpm,                0);
+  setDivergVal('divTemp',     dv.supply_air_temp_c,      2);
+}
+
+function setHealthBar(barId, pctId, value) {
+  if (value == null) return;
+  const fill = document.getElementById(barId);
+  const pctEl = document.getElementById(pctId);
+  const v = Math.max(0, Math.min(100, value));
+  fill.style.width = v + '%';
+  fill.classList.remove('warn', 'crit');
+  if (v < 60) fill.classList.add('crit');
+  else if (v < 80) fill.classList.add('warn');
+  pctEl.textContent = v.toFixed(1) + '%';
+}
+
+function setDivergVal(elId, value, decimals) {
+  if (value == null) return;
+  const el = document.getElementById(elId);
+  const sign = value > 0 ? '+' : '';
+  el.textContent = sign + value.toFixed(decimals);
+  el.className = 'diverg-val';
+  const abs = Math.abs(value);
+  if (abs < 0.5) { el.classList.add('neutral'); return; }
+  el.classList.add(value > 0 ? 'pos' : 'neg');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Data streaming loop (10 Hz backend poll)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -523,6 +662,11 @@ async function streamLoop() {
     // Handle alert
     if (data.alert) {
       handleAlert(data.alert);
+    }
+
+    // Digital twin state
+    if (data.twin && data.twin.state) {
+      updateTwinPanel(data.twin);
     }
 
   } catch (err) {

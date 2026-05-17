@@ -34,7 +34,7 @@ class TwinEngine:
     def __init__(self, use_coolprop: bool = True, nominal_ambient_c: float = 35.0):
         self._physics          = HVACPhysicsModel(use_coolprop=use_coolprop)
         self._degradation      = DegradationModel()
-        self._kalman           = KalmanStateEstimator()
+        self._kalman           = KalmanStateEstimator(degradation_model=self._degradation)
         self._nominal_ambient  = nominal_ambient_c
         log.info("TwinEngine ready  coolprop=%s", self._physics._coolprop_available)
 
@@ -71,7 +71,8 @@ class TwinEngine:
             supply_air_temp_c      = float(sample["supply_air_temp_c"]),
             model_used             = "real",
         )
-        kalman_result = self._kalman.update(real_pred, degraded_pred)
+        # Pass healthy_pred so UKF can propagate sigma points through h(x)
+        kalman_result = self._kalman.update(real_pred, degraded_pred, healthy_pred)
 
         return {
             "state": {
@@ -79,9 +80,11 @@ class TwinEngine:
                 "compressor_efficiency_pct": round(float(kalman_result.x[1]), 1),
                 "fan_health_pct":            round(float(kalman_result.x[2]), 1),
             },
-            "prediction": degraded_pred.to_dict(),
-            "divergence":  kalman_result.divergence,
-            "model_used":  degraded_pred.model_used,
+            "prediction":     degraded_pred.to_dict(),
+            "divergence":     kalman_result.divergence,
+            "uncertainty":    kalman_result.uncertainty,
+            "estimator_mode": kalman_result.mode,
+            "model_used":     degraded_pred.model_used,
         }
 
     def reset(self) -> None:
