@@ -202,6 +202,57 @@
     .diverg-val.neg { color: #86EFAC; }
     .diverg-val.neutral { color: #64748B; }
 
+    /* ── RUL panel ── */
+    .rul-panel {
+      background: #111827; border: 1px solid #1E3A5F;
+      border-radius: 10px; padding: 18px; margin-bottom: 24px;
+    }
+    .rul-panel h3 {
+      font-size: 12px; color: #64748B; text-transform: uppercase;
+      letter-spacing: 0.8px; margin-bottom: 14px;
+      border-bottom: 1px solid #1E3A5F; padding-bottom: 10px;
+    }
+    .rul-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; }
+    .rul-card {
+      background: #0D1421; border: 1px solid #1E3A5F;
+      border-radius: 8px; padding: 14px; text-align: center;
+      transition: border-color 0.4s, background 0.4s;
+    }
+    .rul-card.rul-warn  { border-color: rgba(217,119,6,0.5);  background: rgba(217,119,6,0.07); }
+    .rul-card.rul-crit  { border-color: rgba(220,38,38,0.5);  background: rgba(220,38,38,0.07); animation: flashRed 0.6s ease; }
+    .rul-card.rul-dead  { border-color: rgba(220,38,38,0.8);  background: rgba(220,38,38,0.15); }
+    .rul-component { font-size: 11px; color: #64748B; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+    .rul-value {
+      font-size: 32px; font-weight: 700; font-family: 'Courier New', monospace;
+      color: #22C55E; margin-bottom: 2px;
+      transition: color 0.4s;
+    }
+    .rul-card.rul-warn .rul-value { color: #F59E0B; }
+    .rul-card.rul-crit .rul-value { color: #FCA5A5; }
+    .rul-card.rul-dead .rul-value { color: #EF4444; }
+    .rul-unit   { font-size: 11px; color: #475569; margin-bottom: 8px; }
+    .rul-ci {
+      font-size: 11px; color: #475569; font-family: monospace;
+      border-top: 1px solid #1E3A5F; padding-top: 6px; margin-top: 6px;
+    }
+    .rul-mode-row {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 12px; font-size: 11px; color: #475569;
+    }
+    .rul-badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 999px;
+      font-family: monospace;
+      background: rgba(100,116,139,0.15); border: 1px solid rgba(100,116,139,0.4);
+      color: #94A3B8;
+    }
+    .rul-critical-banner {
+      display: none; align-items: center; gap: 10px;
+      background: rgba(220,38,38,0.1); border: 1px solid rgba(220,38,38,0.4);
+      border-radius: 8px; padding: 10px 14px; margin-bottom: 12px;
+      font-size: 13px; color: #FCA5A5; font-weight: 600;
+    }
+    .rul-critical-banner.visible { display: flex; }
+
     /* ── Alert log ── */
     .alert-panel {
       background: #111827; border: 1px solid #1E3A5F;
@@ -364,6 +415,40 @@
           <div class="diverg-val neutral" id="divTemp">—</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- RUL Prognostics Panel -->
+  <div class="rul-panel">
+    <h3>Prognostics &mdash; Remaining Useful Life
+      <span style="float:right;font-size:10px;color:#475569;font-family:monospace" id="rulRateMode">linear regression</span>
+    </h3>
+    <div class="rul-critical-banner" id="rulCriticalBanner">
+      &#9888; CRITICAL: <span id="rulCriticalText">component approaching failure threshold</span>
+    </div>
+    <div class="rul-grid">
+      <div class="rul-card" id="rulCardRefrig">
+        <div class="rul-component">Refrigerant Charge</div>
+        <div class="rul-value" id="rulValRefrig">&infin;</div>
+        <div class="rul-unit" id="rulUnitRefrig">healthy</div>
+        <div class="rul-ci" id="rulCIRefrig">CI: &mdash;</div>
+      </div>
+      <div class="rul-card" id="rulCardComp">
+        <div class="rul-component">Compressor Efficiency</div>
+        <div class="rul-value" id="rulValComp">&infin;</div>
+        <div class="rul-unit" id="rulUnitComp">healthy</div>
+        <div class="rul-ci" id="rulCIComp">CI: &mdash;</div>
+      </div>
+      <div class="rul-card" id="rulCardFan">
+        <div class="rul-component">Fan Health</div>
+        <div class="rul-value" id="rulValFan">&infin;</div>
+        <div class="rul-unit" id="rulUnitFan">healthy</div>
+        <div class="rul-ci" id="rulCIFan">CI: &mdash;</div>
+      </div>
+    </div>
+    <div class="rul-mode-row">
+      <span id="rulHistorySamples">History: 0 samples</span>
+      <span class="rul-badge" id="rulModeBadge">awaiting data</span>
     </div>
   </div>
 
@@ -612,6 +697,86 @@ function setDivergVal(elId, value, decimals) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// RUL Panel
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const RUL_MAX        = 9998;   // sentinel for "healthy"
+const RUL_WARN_SECS  = 30;     // yellow below this
+const RUL_CRIT_SECS  = 10;     // red below this
+
+function formatRUL(secs) {
+  if (secs >= RUL_MAX) return { text: '∞', unit: 'healthy' };
+  if (secs === 0)      return { text: 'FAILED', unit: 'at critical threshold' };
+  if (secs >= 3600)    return { text: (secs / 3600).toFixed(1), unit: 'hours remaining' };
+  if (secs >= 60)      return { text: (secs / 60).toFixed(1),   unit: 'min remaining' };
+  return { text: secs.toFixed(1), unit: 'sec remaining' };
+}
+
+function setRULCard(cardId, valId, unitId, ciId, rul, lower, upper) {
+  const card = document.getElementById(cardId);
+  const fmt  = formatRUL(rul);
+  const fmtL = formatRUL(lower);
+  const fmtH = formatRUL(upper);
+
+  document.getElementById(valId).textContent  = fmt.text;
+  document.getElementById(unitId).textContent = fmt.unit;
+
+  // Confidence interval
+  const ciEl = document.getElementById(ciId);
+  if (rul >= RUL_MAX) {
+    ciEl.textContent = 'CI: stable';
+  } else {
+    ciEl.textContent = `CI: ${fmtL.text} – ${fmtH.text}`;
+  }
+
+  // Color classes
+  card.classList.remove('rul-warn', 'rul-crit', 'rul-dead');
+  if (rul === 0) {
+    card.classList.add('rul-dead');
+  } else if (rul < RUL_CRIT_SECS) {
+    card.classList.add('rul-crit');
+    void card.offsetWidth;
+  } else if (rul < RUL_WARN_SECS) {
+    card.classList.add('rul-warn');
+  }
+}
+
+function updateRULPanel(rul) {
+  if (!rul) return;
+
+  setRULCard('rulCardRefrig', 'rulValRefrig', 'rulUnitRefrig', 'rulCIRefrig',
+    rul.refrigerant_rul_days, rul.refrigerant_rul_days_lower, rul.refrigerant_rul_days_upper);
+
+  setRULCard('rulCardComp', 'rulValComp', 'rulUnitComp', 'rulCIComp',
+    rul.compressor_rul_days, rul.compressor_rul_days_lower, rul.compressor_rul_days_upper);
+
+  setRULCard('rulCardFan', 'rulValFan', 'rulUnitFan', 'rulCIFan',
+    rul.fan_rul_days, rul.fan_rul_days_lower, rul.fan_rul_days_upper);
+
+  // Most-critical banner
+  const minRUL   = rul.days_to_any_failure;
+  const banner   = document.getElementById('rulCriticalBanner');
+  const critText = document.getElementById('rulCriticalText');
+  if (minRUL < RUL_CRIT_SECS && minRUL > 0) {
+    critText.textContent = `${rul.most_critical_component.toUpperCase()} approaching failure — ${formatRUL(minRUL).text} ${formatRUL(minRUL).unit}`;
+    banner.classList.add('visible');
+  } else if (minRUL === 0) {
+    critText.textContent = `${rul.most_critical_component.toUpperCase()} has reached critical threshold`;
+    banner.classList.add('visible');
+  } else {
+    banner.classList.remove('visible');
+  }
+
+  // Mode badge + history count
+  const samples = rul.history_samples || 0;
+  const mode    = rul.rate_mode || 'linear';
+  document.getElementById('rulHistorySamples').textContent = `History: ${samples} samples`;
+  document.getElementById('rulModeBadge').textContent      = mode + ' mode';
+  document.getElementById('rulRateMode').textContent       = mode === 'lstm'
+    ? 'LSTM predictor' : 'linear regression';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Data streaming loop (10 Hz backend poll)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -664,9 +829,12 @@ async function streamLoop() {
       handleAlert(data.alert);
     }
 
-    // Digital twin state
+    // Digital twin state + RUL
     if (data.twin && data.twin.state) {
       updateTwinPanel(data.twin);
+    }
+    if (data.twin && data.twin.rul) {
+      updateRULPanel(data.twin.rul);
     }
 
   } catch (err) {

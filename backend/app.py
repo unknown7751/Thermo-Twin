@@ -401,6 +401,16 @@ def twin_state():
     return jsonify({"available": True, "twin": _last_twin_state}), 200
 
 
+@app.get("/twin/rul")
+def twin_rul():
+    if _twin_engine is None:
+        return jsonify({"available": False, "error": "TwinEngine not available"}), 503
+    rul = _last_twin_state.get("rul")
+    if rul is None:
+        return jsonify({"available": False, "error": "No RUL computed yet — stream not started"}), 503
+    return jsonify({"available": True, "rul": rul}), 200
+
+
 @app.post("/twin/reset")
 def twin_reset():
     if _twin_engine is None:
