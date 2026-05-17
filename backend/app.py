@@ -16,11 +16,13 @@ Endpoints:
 import sys
 import json
 import logging
+import threading
 import numpy as np
 from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
+from flask_sock import Sock
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
@@ -49,6 +51,36 @@ log = logging.getLogger("thermo-twin")
 
 app = Flask(__name__)
 CORS(app)
+sock = Sock(app)
+
+# --- WebSocket client registry ---
+_ws_clients: list = []
+_ws_lock = threading.Lock()
+
+# --- Infrastructure (InfluxDB + MQTT) — graceful if unavailable ---
+try:
+    from influx_writer import InfluxWriter
+    _influx = InfluxWriter()
+except Exception:
+    _influx = None
+
+try:
+    from mqtt_publisher import MQTTPublisher
+    _mqtt = MQTTPublisher()
+except Exception:
+    _mqtt = None
+
+from twin_schema import TwinSample, TwinAlert
+
+# --- Physics twin engine ---
+try:
+    from twin_engine import TwinEngine
+    _twin_engine = TwinEngine(use_coolprop=False)
+except Exception as _twin_exc:
+    log.warning("TwinEngine failed to initialize (%s) — /twin/state will return 503", _twin_exc)
+    _twin_engine = None
+
+_last_twin_state: dict = {}
 
 # --- In-memory state ---
 
@@ -155,7 +187,41 @@ def _append_alert(payload):
         )
 
 
+# --- WebSocket helpers ---
+
+def _broadcast_ws(event: str, data: dict) -> None:
+    msg = json.dumps({"event": event, "data": data})
+    dead = []
+    with _ws_lock:
+        for ws in _ws_clients:
+            try:
+                ws.send(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            _ws_clients.remove(ws)
+
+
 # --- Routes ---
+
+@sock.route("/ws")
+def ws_stream(ws):
+    with _ws_lock:
+        _ws_clients.append(ws)
+    log.info("WebSocket client connected (total=%d)", len(_ws_clients))
+    try:
+        while True:
+            msg = ws.receive(timeout=30)
+            if msg is None:
+                break
+    except Exception:
+        pass
+    finally:
+        with _ws_lock:
+            if ws in _ws_clients:
+                _ws_clients.remove(ws)
+        log.info("WebSocket client disconnected (total=%d)", len(_ws_clients))
+
 
 @app.get("/health")
 def health():
@@ -257,8 +323,31 @@ def serve_live_demo():
 def stream_next_sample():
     sample = live_streamer.get_next_sample()
     live_injector.apply_to_live_sample(sample)   # modifies sample in-place if in fault window
+
+    twin_sample = TwinSample.from_streamer_dict(sample, machine_id="LIVE-DEMO-UNIT")
+    if _influx:
+        _influx.write_sample(twin_sample)
+    if _mqtt:
+        _mqtt.publish_sample(twin_sample)
+
     history = list(live_streamer.history)
     alert   = live_detector.process_from_history(history)
+
+    if alert:
+        twin_alert = TwinAlert.from_alert_dict(alert)
+        if _influx:
+            _influx.write_alert(twin_alert)
+        if _mqtt:
+            _mqtt.publish_alert(twin_alert)
+        _broadcast_ws("alert", alert)
+
+    _broadcast_ws("sample", sample)
+
+    if _twin_engine:
+        twin_result = _twin_engine.process_sample(sample)
+        _last_twin_state.update(twin_result)
+        _broadcast_ws("twin_state", twin_result)
+
     return jsonify({
         "sample":           sample,
         "alert":            alert,
@@ -297,7 +386,27 @@ def stream_detection_history():
 @app.post("/stream/reset")
 def stream_reset():
     live_detector.reset()
+    if _twin_engine:
+        _twin_engine.reset()
     return jsonify({"status": "detector_reset"}), 200
+
+
+# --- Digital twin endpoints ---
+
+@app.get("/twin/state")
+def twin_state():
+    if _twin_engine is None:
+        return jsonify({"error": "TwinEngine not available"}), 503
+    return jsonify({"available": True, "twin": _last_twin_state}), 200
+
+
+@app.post("/twin/reset")
+def twin_reset():
+    if _twin_engine is None:
+        return jsonify({"error": "TwinEngine not available"}), 503
+    _twin_engine.reset()
+    _last_twin_state.clear()
+    return jsonify({"status": "reset"}), 200
 
 
 # --- Entry point ---
@@ -305,4 +414,10 @@ def stream_reset():
 if __name__ == "__main__":
     log.info("Starting Thermo-Twin Alert Backend on port %d", PORT)
     log.info("Demo scenarios loaded: %s", list(demo_scenarios.keys()))
-    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
+    try:
+        app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)
+    finally:
+        if _influx:
+            _influx.close()
+        if _mqtt:
+            _mqtt.disconnect()
