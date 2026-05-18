@@ -145,6 +145,98 @@ log.info(
     threshold_mgr.is_dynamic,
 )
 
+# --- Background 10 Hz streaming loop ---
+# Pre-generates samples so /stream/next-sample returns instantly from a queue.
+import collections as _collections
+import time as _time
+
+_sample_queue  = _collections.deque(maxlen=120)  # ~2.4s buffer at 50 Hz
+_persist_queue = _collections.deque(maxlen=200)  # InfluxDB/MQTT backlog (drops oldest if slow)
+_stream_lock   = threading.Lock()
+
+
+def _persist_worker():
+    """Drains InfluxDB/MQTT writes off the critical path. If these services are slow
+    this thread falls behind / drops items but NEVER blocks sample generation."""
+    global _influx, _mqtt
+    while True:
+        if not _persist_queue:
+            _time.sleep(0.02)
+            continue
+        kind, payload = _persist_queue.popleft()
+        if kind == "sample":
+            if _influx:
+                try: _influx.write_sample(payload)
+                except Exception:
+                    log.warning("InfluxDB write failed — disabling for this session")
+                    _influx = None
+            if _mqtt:
+                try: _mqtt.publish_sample(payload)
+                except Exception:
+                    log.warning("MQTT publish failed — disabling for this session")
+                    _mqtt = None
+        elif kind == "alert":
+            if _influx:
+                try: _influx.write_alert(payload)
+                except Exception: _influx = None
+            if _mqtt:
+                try: _mqtt.publish_alert(payload)
+                except Exception: _mqtt = None
+
+
+def _stream_loop():
+    INTERVAL = 0.33  # ~3 Hz — slow, realistic sensor streaming rate
+    while True:
+        t0 = _time.monotonic()
+        try:
+            with _stream_lock:
+                sample = live_streamer.get_next_sample()
+                live_injector.apply_to_live_sample(sample)
+
+            history = list(live_streamer.history)
+            alert   = live_detector.process_from_history(history)
+
+            twin_result = {}
+            if _twin_engine:
+                twin_result = _twin_engine.process_sample(sample)
+                _last_twin_state.update(twin_result)
+
+            # Hand off persistence to the background worker (non-blocking)
+            if _influx or _mqtt:
+                twin_sample = TwinSample.from_streamer_dict(sample, machine_id="LIVE-DEMO-UNIT")
+                _persist_queue.append(("sample", twin_sample))
+
+            if alert:
+                _append_alert(alert)
+                _broadcast_ws("alert", alert)
+                if _influx or _mqtt:
+                    _persist_queue.append(("alert", TwinAlert.from_alert_dict(alert)))
+
+            _broadcast_ws("sample", sample)
+
+            _sample_queue.append({
+                "sample":           sample,
+                "alert":            alert,
+                "current_time":     live_streamer.current_time,
+                "buffer_size":      len(live_streamer.history),
+                "total_samples":    live_streamer.sample_index,
+                "scheduled_faults": live_injector.get_scheduled_faults(),
+                "twin":             dict(_last_twin_state) if twin_result else None,
+            })
+        except Exception as _e:
+            log.error("Stream loop error: %s", _e)
+
+        elapsed = _time.monotonic() - t0
+        _time.sleep(max(0, INTERVAL - elapsed))
+
+
+_persist_thread = threading.Thread(target=_persist_worker, daemon=True, name="persist-worker")
+_persist_thread.start()
+
+_stream_thread = threading.Thread(target=_stream_loop, daemon=True, name="stream-loop")
+_stream_thread.start()
+log.info("Background stream loop started at 10 Hz")
+
 demo_scenarios = {}
 if DEMO_JSON.exists():
     with open(DEMO_JSON) as f:
@@ -321,40 +413,30 @@ def serve_live_demo():
 
 @app.get("/stream/next-sample")
 def stream_next_sample():
-    sample = live_streamer.get_next_sample()
-    live_injector.apply_to_live_sample(sample)   # modifies sample in-place if in fault window
+    # Drain up to 20 queued samples per poll so the frontend never falls behind.
+    # At 50 Hz backend / 10 Hz poll, ~5 samples accrue per poll; 20 gives catch-up headroom.
+    # The last item becomes the primary response; earlier ones are bundled as backlog.
+    batch = []
+    for _ in range(20):
+        if not _sample_queue:
+            break
+        batch.append(_sample_queue.popleft())
 
-    twin_sample = TwinSample.from_streamer_dict(sample, machine_id="LIVE-DEMO-UNIT")
-    if _influx:
-        _influx.write_sample(twin_sample)
-    if _mqtt:
-        _mqtt.publish_sample(twin_sample)
+    if batch:
+        primary = batch[-1]
+        primary["backlog"] = batch[:-1]   # earlier samples the frontend should also draw
+        return jsonify(primary), 200
 
-    history = list(live_streamer.history)
-    alert   = live_detector.process_from_history(history)
-
-    if alert:
-        twin_alert = TwinAlert.from_alert_dict(alert)
-        if _influx:
-            _influx.write_alert(twin_alert)
-        if _mqtt:
-            _mqtt.publish_alert(twin_alert)
-        _broadcast_ws("alert", alert)
-
-    _broadcast_ws("sample", sample)
-
-    if _twin_engine:
-        twin_result = _twin_engine.process_sample(sample)
-        _last_twin_state.update(twin_result)
-        _broadcast_ws("twin_state", twin_result)
-
+    # Queue empty (backend warming up) — return placeholder.
     return jsonify({
-        "sample":           sample,
-        "alert":            alert,
+        "sample":           None,
+        "alert":            None,
+        "backlog":          [],
         "current_time":     live_streamer.current_time,
         "buffer_size":      len(live_streamer.history),
-        "scheduled_faults": live_injector.get_scheduled_faults(),
-        "twin":             _last_twin_state if _twin_engine else None,
+        "total_samples":    live_streamer.sample_index,
+        "scheduled_faults": [],
+        "twin":             dict(_last_twin_state) if _last_twin_state else None,
     }), 200
 
 
@@ -386,6 +468,11 @@ def stream_detection_history():
 
 @app.post("/stream/reset")
 def stream_reset():
+    with _stream_lock:
+        live_streamer.__init__()          # reset streamer state
+        live_injector.__init__(live_streamer)
+    _sample_queue.clear()
+    _last_twin_state.clear()
     live_detector.reset()
     if _twin_engine:
         _twin_engine.reset()

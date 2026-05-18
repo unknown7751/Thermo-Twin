@@ -10,7 +10,7 @@ class SyntheticDataStreamer:
         self._drift_acc = 0.0   # random-walk accumulator (matches training cumsum)
 
     def get_next_sample(self):
-        self.current_time += 0.1
+        self.current_time += 0.5
         self.sample_index += 1
 
         # Exact same demand formula as generate_sensor_data.py
