@@ -13,6 +13,7 @@ from physics.state_estimator import KalmanStateEstimator
 from degradation_trajectory import DegradationTrajectoryModel
 from rul_engine import RULEngine
 from particle_filter import ParticleFilterRUL
+from whatif_engine import WhatIfSimulator, WhatIfRequest
 
 log = logging.getLogger("thermo-twin.engine")
 
@@ -60,6 +61,7 @@ class TwinEngine:
         self._rul_engine  = RULEngine()
         self._pf          = ParticleFilterRUL(n_particles=200, noise_factor=0.15, rng_seed=0)
         self._time_unit   = time_unit_seconds
+        self._whatif      = WhatIfSimulator(use_coolprop=use_coolprop)
 
         log.info(
             "TwinEngine ready  coolprop=%s  lstm=%s  time_unit=%.1fs",
@@ -147,6 +149,25 @@ class TwinEngine:
                 ) else "linear",
             },
         }
+
+    def simulate_whatif(self, params: dict) -> dict:
+        """
+        Project a hypothetical operating scenario forward (Phase 4 What-If).
+
+        Starts from the twin's *current* estimated health so the projection is
+        grounded in the machine's real condition, not a fresh/perfect unit.
+        """
+        health = self._kalman.get_health()
+        req = WhatIfRequest(
+            compressor_speed_pct      = float(params.get("compressor_speed_pct", 70.0)),
+            ambient_temp_c            = float(params.get("ambient_temp_c", 35.0)),
+            load_demand_pct           = float(params.get("load_demand_pct", 50.0)),
+            simulation_duration_hours = float(params.get("simulation_duration_hours", 4.0)),
+            refrigerant_charge_pct    = health.refrigerant_charge_pct,
+            compressor_efficiency_pct = health.compressor_efficiency_pct,
+            fan_health_pct            = health.fan_health_pct,
+        )
+        return self._whatif.simulate(req, include_baseline=True)
 
     def reset(self) -> None:
         """Reset Kalman state and health history (call after part replacement or stream reset)."""

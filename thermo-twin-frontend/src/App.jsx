@@ -5,6 +5,7 @@ import Sidebar       from './components/Sidebar.jsx'
 import FaultControls from './components/FaultControls.jsx'
 import TwinPanel     from './components/TwinPanel.jsx'
 import RULPanel      from './components/RULPanel.jsx'
+import WhatIfPanel   from './components/WhatIfPanel.jsx'
 import ShapPanel     from './components/ShapPanel.jsx'
 import AlertLog      from './components/AlertLog.jsx'
 import { useStreamData } from './hooks/useStreamData.js'
@@ -34,7 +35,10 @@ export default function App() {
           <RULPanel />
         </div>
 
-        {/* ── Row 4: SHAP attribution (hidden until first alert) ── */}
+        {/* ── Row 4: What-If simulator (Phase 4) ── */}
+        <WhatIfPanel />
+
+        {/* ── Row 5: SHAP attribution (hidden until first alert) ── */}
         <ShapPanel />
 
         {/* ── Row 5: Alert history ── */}

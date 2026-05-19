@@ -498,6 +498,19 @@ def twin_rul():
     return jsonify({"available": True, "rul": rul}), 200
 
 
+@app.post("/twin/whatif")
+def twin_whatif():
+    if _twin_engine is None:
+        return jsonify({"error": "TwinEngine not available"}), 503
+    params = request.get_json(silent=True) or {}
+    try:
+        result = _twin_engine.simulate_whatif(params)
+        return jsonify(result), 200
+    except Exception as exc:
+        log.error("What-if simulation failed: %s", exc)
+        return jsonify({"error": f"simulation failed: {exc}"}), 500
+
+
 @app.post("/twin/reset")
 def twin_reset():
     if _twin_engine is None:
