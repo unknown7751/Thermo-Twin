@@ -3,8 +3,10 @@ import Header        from './components/Header.jsx'
 import ChartPanel    from './components/ChartPanel.jsx'
 import Sidebar       from './components/Sidebar.jsx'
 import FaultControls from './components/FaultControls.jsx'
+import { HVAC3D }    from './components/HVAC3D.jsx'
 import TwinPanel     from './components/TwinPanel.jsx'
 import RULPanel      from './components/RULPanel.jsx'
+import WhatIfPanel   from './components/WhatIfPanel.jsx'
 import ShapPanel     from './components/ShapPanel.jsx'
 import AlertLog      from './components/AlertLog.jsx'
 import { useStreamData } from './hooks/useStreamData.js'
@@ -28,13 +30,19 @@ export default function App() {
         {/* ── Row 2: Fault injection controls ── */}
         <FaultControls />
 
+        {/* ── Row 2.5: 3D digital twin (Phase 5) ── */}
+        <HVAC3D />
+
         {/* ── Row 3: Digital twin state + RUL prognostics ── */}
         <div className="grid grid-cols-2 gap-4">
           <TwinPanel />
           <RULPanel />
         </div>
 
-        {/* ── Row 4: SHAP attribution (hidden until first alert) ── */}
+        {/* ── Row 4: What-If simulator (Phase 4) ── */}
+        <WhatIfPanel />
+
+        {/* ── Row 5: SHAP attribution (hidden until first alert) ── */}
         <ShapPanel />
 
         {/* ── Row 5: Alert history ── */}
