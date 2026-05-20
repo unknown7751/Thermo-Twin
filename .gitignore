@@ -12,7 +12,7 @@ data/raw/*.csv
 # model/checkpoints/threshold_config.json -- committed
 
 # Exclude only the large isolation forest model
-model/checkpoints/isolation_forest.pkl
+# model/checkpoints/isolation_forest.pkl
 
 # Python
 __pycache__/
