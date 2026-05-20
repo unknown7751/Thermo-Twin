@@ -171,6 +171,43 @@ _persist_queue = _collections.deque(maxlen=200)  # InfluxDB/MQTT backlog (drops 
 _stream_lock   = threading.Lock()
 
 
+# --- Helpers ---
+
+def _now_iso():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _append_alert(payload):
+    if len(alert_history) >= MAX_HISTORY:
+        alert_history.pop(0)
+    alert_history.append(payload)
+    recon_err = payload.get("reconstruction_error")
+    sev       = payload.get("severity_score", 100)
+    if recon_err is not None:
+        threshold_mgr.update(recon_err, sev)
+        log.info(
+            "Threshold updated - current=%.4f  buffer=%d  dynamic=%s",
+            threshold_mgr.get_threshold(),
+            threshold_mgr.buffer_size,
+            threshold_mgr.is_dynamic,
+        )
+
+
+# --- WebSocket helpers ---
+
+def _broadcast_ws(event: str, data: dict) -> None:
+    msg = json.dumps({"event": event, "data": data})
+    dead = []
+    with _ws_lock:
+        for ws in _ws_clients:
+            try:
+                ws.send(msg)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            _ws_clients.remove(ws)
+
+
 def _persist_worker():
     """Drains InfluxDB/MQTT writes off the critical path. If these services are slow
     this thread falls behind / drops items but NEVER blocks sample generation."""
@@ -328,41 +365,7 @@ else:
     log.warning("demo_explanations.json not found - /demo endpoints will return 404")
 
 
-# --- Helpers ---
 
-def _now_iso():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _append_alert(payload):
-    if len(alert_history) >= MAX_HISTORY:
-        alert_history.pop(0)
-    alert_history.append(payload)
-    recon_err = payload.get("reconstruction_error")
-    sev       = payload.get("severity_score", 100)
-    if recon_err is not None:
-        threshold_mgr.update(recon_err, sev)
-        log.info(
-            "Threshold updated - current=%.4f  buffer=%d  dynamic=%s",
-            threshold_mgr.get_threshold(),
-            threshold_mgr.buffer_size,
-            threshold_mgr.is_dynamic,
-        )
-
-
-# --- WebSocket helpers ---
-
-def _broadcast_ws(event: str, data: dict) -> None:
-    msg = json.dumps({"event": event, "data": data})
-    dead = []
-    with _ws_lock:
-        for ws in _ws_clients:
-            try:
-                ws.send(msg)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            _ws_clients.remove(ws)
 
 
 # --- Routes ---
