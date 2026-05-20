@@ -1,0 +1,38 @@
+# Core ML / numerics
+numpy>=1.24,<2.0
+pandas>=2.0
+scikit-learn>=1.3
+scipy>=1.10
+torch>=2.0
+shap>=0.43
+
+# Visualisation
+matplotlib>=3.7
+plotly>=5.15
+
+# Web backend
+flask>=3.0
+flask-cors>=4.0
+flask-sock>=0.7
+Werkzeug>=3.0
+
+# HTTP / async
+requests>=2.31
+websockets>=12.0
+simple-websocket>=0.9
+
+# Physics twin
+CoolProp>=6.6
+
+# Data / serialisation
+cloudpickle>=3.0
+joblib>=1.3
+tqdm>=4.65
+packaging>=23.0
+python-dateutil>=2.8
+
+# Misc
+blinker>=1.6
+click>=8.1
+colorama>=0.4.6
+pillow>=10.0
