@@ -1,4 +1,12 @@
+import { NavLink } from 'react-router-dom'
 import useAppStore from '../store/appStore.js'
+
+const navLink = ({ isActive }) =>
+  `px-3 py-1.5 rounded text-xs font-medium transition-all ${
+    isActive
+      ? 'bg-cyan-900/40 border border-cyan-700 text-cyan-300'
+      : 'border border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-700'
+  }`
 
 export default function Header() {
   const stream        = useAppStore((s) => s.stream)
@@ -10,12 +18,18 @@ export default function Header() {
     <header className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-6 py-3">
       <div className="max-w-[1920px] mx-auto flex items-center justify-between">
 
-        {/* ── Brand ── */}
-        <div className="flex items-center gap-3">
-          <span className="text-2xl font-bold tracking-tight text-white">
-            Thermo<span className="text-cyan-400">Twin</span>
-          </span>
-          <span className="text-xs text-slate-500 font-mono">Digital Twin Dashboard</span>
+        {/* ── Brand + nav ── */}
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl font-bold tracking-tight text-white">
+              Thermo<span className="text-cyan-400">Twin</span>
+            </span>
+            <span className="text-xs text-slate-500 font-mono">Digital Twin</span>
+          </div>
+          <nav className="flex items-center gap-1">
+            <NavLink to="/"      end className={navLink}>Single Unit</NavLink>
+            <NavLink to="/fleet"     className={navLink}>Fleet</NavLink>
+          </nav>
         </div>
 
         {/* ── Status chips ── */}

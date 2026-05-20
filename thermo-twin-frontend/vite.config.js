@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/stream':  { target: 'http://localhost:5000', changeOrigin: true },
       '/twin':    { target: 'http://localhost:5000', changeOrigin: true },
+      '/fleet':   { target: 'http://localhost:5000', changeOrigin: true },
       '/alerts':  { target: 'http://localhost:5000', changeOrigin: true },
       '/health':  { target: 'http://localhost:5000', changeOrigin: true },
       '/demo':    { target: 'http://localhost:5000', changeOrigin: true },

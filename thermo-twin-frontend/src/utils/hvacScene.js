@@ -164,10 +164,15 @@ export class HVACScene {
 
     this.scene.add(this.unit)
 
-    // Meshes eligible for raycasting (name → component id)
+    // Meshes eligible for raycasting (name → component id).
+    // condenserGroup is included so its fan-blade children are also hit-tested
+    // (recursive=true in intersectObjects).  Any hit inside the group resolves
+    // to 'condenser' via _resolveComponentName().
     this._pickables = [
-      this.compressorMesh, this.condenserBody,
-      this.evaporatorMesh, this.valveMesh,
+      this.compressorMesh,
+      this.condenserGroup,  // ← whole group, fan blades hit-tested recursively
+      this.evaporatorMesh,  // ← core mesh only; fins are decorative, not pickable
+      this.valveMesh,
     ]
   }
 
@@ -208,8 +213,25 @@ export class HVACScene {
     this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
     this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(this.mouse, this.camera)
-    const hits = this.raycaster.intersectObjects(this._pickables, false)
-    return hits.length ? hits[0].object.name : null
+    // recursive=true so fan blades / evaporator fins (child meshes) are tested
+    const hits = this.raycaster.intersectObjects(this._pickables, true)
+    if (!hits.length) return null
+    return this._resolveComponentName(hits[0].object)
+  }
+
+  /**
+   * Walk up the Three.js parent chain from the hit object until we find a node
+   * whose name is one of the four known component ids.  This lets any blade,
+   * fin, or sub-mesh inside a group resolve back to the top-level component.
+   */
+  _resolveComponentName(obj) {
+    const KNOWN = new Set(['compressor', 'condenser', 'evaporator', 'valve'])
+    let cur = obj
+    while (cur) {
+      if (KNOWN.has(cur.name)) return cur.name
+      cur = cur.parent
+    }
+    return null
   }
 
   _handleMouseMove(event) {

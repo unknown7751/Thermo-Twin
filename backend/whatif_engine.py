@@ -58,7 +58,8 @@ class WhatIfRequest:
 class WhatIfSimulator:
     """Projects a scenario forward using physics + degradation models."""
 
-    _STEP_MINUTES = 15          # trajectory resolution
+    _STEP_MINUTES = 15          # finest trajectory resolution (short runs)
+    _MAX_POINTS   = 300         # cap trajectory length; long runs use coarser steps
     _ANOMALY_WARN = 0.15        # score thresholds (match frontend visualMap)
     _ANOMALY_CRIT = 0.30
 
@@ -66,26 +67,45 @@ class WhatIfSimulator:
         self._physics     = HVACPhysicsModel(use_coolprop=use_coolprop)
         self._degradation = DegradationModel()
 
+    # Wear floor at the design point — equipment is rated for nominal, so it
+    # ages negligibly there (~years to fail). Component lifetimes at this rate:
+    #   fan  ≈ 90 / 0.002  ≈ 45,000 h ≈ 5 years   → baseline is visually flat.
+    _WEAR_FLOOR = 0.002  # %/hour
+
+    # Nominal design point (no overstress below these values)
+    _NOM_SPEED = 70.0
+    _NOM_AMB   = 35.0
+    _NOM_LOAD  = 50.0
+
     # ── Wear-rate model ────────────────────────────────────────────────────────
     def _wear_rates(self, c: WhatIfRequest) -> dict:
         """
-        Component wear (pct/hour) as a function of operating stress.
-        Calibrated so the nominal baseline (70/35/50) decays very slowly
-        (safe for days) while extreme conditions degrade in hours.
+        Component wear (pct/hour) driven by OVERSTRESS above the nominal design
+        point — not absolute operating level. Equipment rated for 70/35/50
+        barely ages there; wear accrues only as conditions exceed design.
+
+          • Healthy baseline (70/35/50) → ~0.002 %/hr → effectively flat / years
+          • Extreme max (100/50/100)    → ~7–10 %/hr  → critical in ~7–10 h (demo)
+
+        Each overstress term is normalized to 0 at nominal and 1 at the slider
+        maximum, then raised to a power for realistic non-linear acceleration.
         """
-        speed_frac = c.compressor_speed_pct / 100.0
-        load_frac  = c.load_demand_pct / 100.0
-        # Ambient stress: 0 at 35°C, grows quadratically toward 50°C
-        amb_stress = max(0.0, (c.ambient_temp_c - 35.0) / 15.0) ** 2
+        f = self._WEAR_FLOOR
 
-        # Refrigerant leak accelerates with high head pressure (hot ambient)
-        leak_rate = 0.05 + 1.8 * amb_stress + 0.4 * (load_frac - 0.5 if load_frac > 0.5 else 0)
+        # Normalized overstress (0 at design point, 1 at slider max), clamped ≥0
+        speed_over = max(0.0, (c.compressor_speed_pct - self._NOM_SPEED) / (100.0 - self._NOM_SPEED))
+        amb_over   = max(0.0, (c.ambient_temp_c       - self._NOM_AMB)   / (50.0  - self._NOM_AMB))
+        load_over  = max(0.0, (c.load_demand_pct      - self._NOM_LOAD)  / (100.0 - self._NOM_LOAD))
 
-        # Compressor wear accelerates with speed³ (mechanical fatigue) and heat
-        comp_wear_rate = 0.04 + 1.6 * (speed_frac ** 3) * load_frac + 0.9 * amb_stress
+        # Refrigerant leak: driven by head pressure (hot ambient) + heavy load
+        leak_rate = f + 6.0 * (amb_over ** 2) + 1.5 * load_over
 
-        # Fan bearing wear accelerates with speed and heat
-        fan_wear_rate = 0.03 + 0.8 * (speed_frac ** 2) + 0.6 * amb_stress
+        # Compressor wear: mechanical fatigue ∝ speed-overstress², amplified by
+        # load, plus thermal stress from high ambient
+        comp_wear_rate = f + 7.0 * (speed_over ** 2) * (0.5 + 0.5 * load_over) + 3.0 * (amb_over ** 2)
+
+        # Fan bearing wear: speed-overstress² + thermal stress
+        fan_wear_rate = f + 6.0 * (speed_over ** 2) + 3.0 * (amb_over ** 2)
 
         return {
             "leak_rate":      round(max(0.0, leak_rate), 4),
@@ -124,8 +144,11 @@ class WhatIfSimulator:
         )
 
         duration_min = max(30.0, req.simulation_duration_hours * 60.0)
-        n_steps      = int(duration_min / self._STEP_MINUTES) + 1
-        dt_hours     = self._STEP_MINUTES / 60.0
+        # Adaptive step: 15-min resolution for short runs, but never more than
+        # _MAX_POINTS samples so a 250,000-hour horizon stays fast & renderable.
+        step_min = max(self._STEP_MINUTES, duration_min / self._MAX_POINTS)
+        n_steps  = int(duration_min / step_min) + 1
+        dt_hours = step_min / 60.0
 
         trajectory          = []
         time_to_critical_h  = None
@@ -133,7 +156,7 @@ class WhatIfSimulator:
         total_energy_kwh    = 0.0
 
         for step in range(n_steps):
-            t_min   = step * self._STEP_MINUTES
+            t_min   = step * step_min
             degraded = self._degradation.apply(healthy, health)
             score    = self._anomaly_score(healthy, degraded)
             peak_score = max(peak_score, score)
@@ -183,15 +206,17 @@ class WhatIfSimulator:
     def simulate(self, req: WhatIfRequest, include_baseline: bool = True) -> dict:
         scenario = self._project(req)
 
-        # Baseline = nominal operating point, same duration & starting health
+        # Baseline = a HEALTHY machine (100/100/100) run at the nominal
+        # operating point for the same horizon. This is a fixed reference, so
+        # any degraded/stressed scenario always shows a meaningful cost delta
+        # (a unit pulling 190% power will correctly read as far costlier than
+        # a brand-new unit run normally — not "₹0" against itself).
         baseline_req = WhatIfRequest(
             compressor_speed_pct      = BASELINE["compressor_speed_pct"],
             ambient_temp_c            = BASELINE["ambient_temp_c"],
             load_demand_pct           = BASELINE["load_demand_pct"],
             simulation_duration_hours = req.simulation_duration_hours,
-            refrigerant_charge_pct    = req.refrigerant_charge_pct,
-            compressor_efficiency_pct = req.compressor_efficiency_pct,
-            fan_health_pct            = req.fan_health_pct,
+            # health left at defaults (100/100/100) = healthy reference
         )
         baseline = self._project(baseline_req) if include_baseline else None
 
