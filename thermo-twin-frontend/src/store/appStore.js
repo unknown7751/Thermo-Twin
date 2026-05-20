@@ -112,6 +112,21 @@ const useAppStore = create((set) => ({
         ? { fault: { active: null, countdownSec: 0, faultStartTime: null, faultEndTime: null } }
         : { fault: { ...s.fault, countdownSec: next } }
     }),
+
+  // ── Fleet (Phase 6) ────────────────────────────────────────────────────────
+  fleet: {
+    units:       [],      // list of machine_id strings
+    metadata:    {},      // machine_id → { location, model, ... }
+    health:      null,    // /fleet/health response
+    queue:       null,    // /fleet/dispatch-queue response
+    anomalies:   [],      // /fleet/anomalies → .anomalies
+    online:      false,   // last fetch succeeded
+    lastFetched: null,
+  },
+  setFleet: (patch) =>
+    set((s) => ({ fleet: { ...s.fleet, ...patch, lastFetched: Date.now() } })),
+  setFleetOnline: (v) =>
+    set((s) => ({ fleet: { ...s.fleet, online: v } })),
 }))
 
 export default useAppStore
