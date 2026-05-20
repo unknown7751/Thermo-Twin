@@ -33,7 +33,8 @@ export function HVAC3D() {
     scene.setHoverCallback(setHover)
     scene.setComponentClickCallback(async (name) => {
       setSelected(name)
-      setHistory([])
+      // Don't clear history immediately — keep the previous chart visible
+      // while the new fetch is in-flight so we don't flash "no history yet".
       try {
         const res = await api.get(`/twin/component-history/${name}`)
         setHistory(res.data?.history ?? [])

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import * as echarts from 'echarts'
-import { subscribe } from '../utils/sampleBus.js'
+import { subscribe, subscribeReset } from '../utils/sampleBus.js'
 import useAppStore from '../store/appStore.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -132,6 +132,23 @@ export default function ChartPanel() {
   }, [])
 
   useEffect(() => subscribe(handleSample), [handleSample])
+
+  // ── Reset: wipe buffers + clear ECharts series ────────────────────────────
+  useEffect(() => subscribeReset(() => {
+    // Clear rolling data buffers
+    buffers.current.forEach((buf) => { buf.length = 0 })
+    // Clear persisted anomaly windows
+    anomaliesRef.current = []
+    // Re-render chart immediately with empty series so old lines vanish
+    const chart = chartRef.current
+    if (!chart) return
+    chart.setOption({
+      series: SENSORS.map((s, i) => ({
+        name: s.label, type: 'line', xAxisIndex: i, yAxisIndex: i,
+        data: [], markArea: { silent: true, data: [] },
+      })),
+    })
+  }), [])
 
   // ── 60fps RAF loop: update x-range + push series data ────────────────────
   useEffect(() => {

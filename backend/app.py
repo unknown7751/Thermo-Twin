@@ -511,6 +511,50 @@ def twin_whatif():
         return jsonify({"error": f"simulation failed: {exc}"}), 500
 
 
+@app.get("/twin/component-history/<component_name>")
+def component_history(component_name):
+    """
+    GET /twin/component-history/compressor?hours=24
+
+    Returns the recent sensor trace for the sensor associated with a 3D
+    component: { history: [{timestamp, value, sensor_type}, ...] }.
+
+    Served from the in-memory streamer ring buffer (real recent samples,
+    never blocks). InfluxDB is intentionally NOT queried synchronously here —
+    it is optional infrastructure and a down/slow broker previously stalled
+    request threads. The buffer holds the genuine recent stream, which is
+    what the inspect panel needs.
+    """
+    sensor_map = {
+        "compressor": "compressor_power_kw",
+        "condenser":  "fan_rpm",
+        "evaporator": "discharge_pressure_psi",
+        "valve":      "supply_air_temp_c",
+    }
+    sensor = sensor_map.get(component_name)
+    if not sensor:
+        return jsonify({"error": "unknown component"}), 400
+
+    samples = list(live_streamer.history)
+    # Downsample to at most ~120 points so the mini-chart stays light
+    max_pts = 120
+    step = max(1, len(samples) // max_pts)
+    history = [
+        {
+            "timestamp":   round(float(s.get("timestamp", 0.0)), 2),
+            "value":       round(float(s.get(sensor, 0.0)), 3),
+            "sensor_type": sensor,
+        }
+        for s in samples[::step]
+    ]
+    return jsonify({
+        "component":   component_name,
+        "sensor_type": sensor,
+        "history":     history,
+        "source":      "stream-buffer",
+    }), 200
+
+
 @app.post("/twin/reset")
 def twin_reset():
     if _twin_engine is None:

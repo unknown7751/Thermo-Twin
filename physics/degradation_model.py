@@ -34,7 +34,11 @@ class DegradationModel:
     _REFRIG_TEMP_RISE_C        = 7.0    # °C rise at 0% charge
     _FAN_RPM_LOSS_FRAC         = 0.80   # fraction of nominal RPM lost at 0% fan health
     _FAN_POWER_CASCADE_KW      = 2.0    # extra kW at 0% fan health (cascade)
-    _FAN_PRESSURE_CASCADE_PSI  = 55.0   # extra psi at 0% fan health
+    # Condenser fan failure traps rejected heat → discharge (head) pressure
+    # SPIKES. Modeled as a fraction of nominal pressure that grows with the
+    # SQUARE of fan loss (heat-rejection capacity falls non-linearly as RPM
+    # drops). At 0% fan health this raises head pressure ~+75%.
+    _FAN_PRESSURE_RISE_FRAC    = 0.75
     _FAN_TEMP_CASCADE_C        = 4.5    # °C rise at 0% fan health
     _COMP_POWER_GAIN_KW        = 2.0    # extra kW at 0% compressor efficiency
     _COMP_PRESSURE_LOSS_PSI    = 45.0   # psi drop at 0% compressor efficiency
@@ -52,12 +56,14 @@ class DegradationModel:
         pressure   -= self._REFRIG_PRESSURE_LOSS_FRAC * charge_loss * pressure
         temp       += self._REFRIG_TEMP_RISE_C * charge_loss
 
-        # Fan bearing wear (RPM drop + cascading compressor stress)
+        # Fan bearing wear: RPM collapses, and because the condenser can no
+        # longer reject heat, discharge pressure SPIKES (dominant effect),
+        # compressor works harder (power up), and supply temp rises.
         fan_loss  = (100.0 - health.fan_health_pct) / 100.0
         fan_rpm  -= self._FAN_RPM_LOSS_FRAC * fan_loss * healthy.fan_rpm
-        power    += self._FAN_POWER_CASCADE_KW    * fan_loss * 0.7
-        pressure += self._FAN_PRESSURE_CASCADE_PSI * fan_loss * 0.7
-        temp     += self._FAN_TEMP_CASCADE_C       * fan_loss * 0.7
+        power    += self._FAN_POWER_CASCADE_KW * fan_loss * 0.7
+        pressure += self._FAN_PRESSURE_RISE_FRAC * (fan_loss ** 2) * pressure
+        temp     += self._FAN_TEMP_CASCADE_C * fan_loss * 0.7
 
         # Compressor efficiency loss
         comp_loss = (100.0 - health.compressor_efficiency_pct) / 100.0

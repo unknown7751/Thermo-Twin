@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import api from '../utils/api.js'
 import useAppStore from '../store/appStore.js'
+import { emitReset } from '../utils/sampleBus.js'
 
 export function useFaultInjection() {
   const setFaultActive    = useAppStore((s) => s.setFaultActive)
@@ -37,6 +38,7 @@ export function useFaultInjection() {
   async function resetStream() {
     try {
       await api.post('/stream/reset')
+      emitReset()   // wipe chart rolling buffers so old lines don't persist
       clearFault()
     } catch (err) {
       console.error('Stream reset failed:', err)

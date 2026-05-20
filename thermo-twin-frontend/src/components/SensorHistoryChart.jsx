@@ -8,24 +8,32 @@ import * as echarts from 'echarts'
  * GET /twin/component-history/<component>. `timestamp` is simulation-seconds
  * (numeric), so we use a value x-axis — not a time axis — which matches how
  * the rest of the dashboard renders simulation time.
+ *
+ * Design note: the chart div is only mounted when history has data (conditional
+ * render).  The data effect includes `hasData` in its deps so it re-fires on
+ * the exact render that first mounts the div, at which point elRef.current is
+ * guaranteed to be assigned (React commits refs before running effects).
  */
 export default function SensorHistoryChart({ history, color = '#22d3ee' }) {
   const elRef    = useRef(null)
   const chartRef = useRef(null)
 
-  useEffect(() => {
-    if (!elRef.current) return
-    const chart = echarts.init(elRef.current, null, { renderer: 'canvas' })
-    chartRef.current = chart
-    const ro = new ResizeObserver(() => chart.resize())
-    ro.observe(elRef.current)
-    return () => { ro.disconnect(); chart.dispose(); chartRef.current = null }
-  }, [])
+  const hasData = history && history.length > 0
 
+  // Init + update effect.
+  // Fires when history changes AND when hasData flips from false → true
+  // (which is the render where the chart div first enters the DOM).
   useEffect(() => {
+    const el = elRef.current
+    if (!el || !hasData) return
+
+    // Create chart instance if needed (first render with data, or after HMR)
+    if (!chartRef.current || chartRef.current.isDisposed?.()) {
+      chartRef.current = echarts.init(el, null, { renderer: 'canvas' })
+    }
     const chart = chartRef.current
-    if (!chart) return
-    const data = (history || []).map((h) => [h.timestamp, h.value])
+
+    const data = history.map((h) => [h.timestamp, h.value])
 
     chart.setOption({
       backgroundColor: 'transparent',
@@ -55,11 +63,26 @@ export default function SensorHistoryChart({ history, color = '#22d3ee' }) {
         areaStyle: { color, opacity: 0.08 },
       }],
     }, { notMerge: true })
-  }, [history, color])
 
-  if (!history || history.length === 0) {
+    // Force resize after layout settles — guarantees the canvas matches
+    // the container even on the very first render.
+    requestAnimationFrame(() => {
+      if (chartRef.current && !chartRef.current.isDisposed?.()) {
+        chartRef.current.resize()
+      }
+    })
+  }, [history, color, hasData])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (chartRef.current) { chartRef.current.dispose(); chartRef.current = null }
+    }
+  }, [])
+
+  if (!hasData) {
     return (
-      <div className="h-[150px] flex items-center justify-center text-xs text-slate-600">
+      <div style={{ height: 150 }} className="flex items-center justify-center text-xs text-slate-600">
         no history yet
       </div>
     )
