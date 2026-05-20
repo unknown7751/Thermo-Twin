@@ -65,6 +65,42 @@ class HVACPhysicsModel:
         self._coolprop_available = False
         if use_coolprop:
             self._coolprop_available = self._check_coolprop()
+        # Promote class-level commissioning coefficients to instance attributes
+        # so Phase 7's recalibration can mutate them without touching the class.
+        self._K_DISC   = type(self)._K_DISC
+        self._K_FAN    = type(self)._K_FAN
+        self._K_TEMP_A = type(self)._K_TEMP_A
+        self._K_TEMP_B = type(self)._K_TEMP_B
+
+    def set_calibration(self, **kwargs) -> None:
+        """Update one or more commissioning coefficients at runtime.
+
+        Accepts any subset of: k_disc, k_fan, k_temp_a, k_temp_b. Values must
+        be positive. Used by the Phase 7 recalibration scheduler after a
+        Bayesian re-fit so future predictions reflect the updated calibration.
+        """
+        mapping = {
+            "k_disc":   "_K_DISC",
+            "k_fan":    "_K_FAN",
+            "k_temp_a": "_K_TEMP_A",
+            "k_temp_b": "_K_TEMP_B",
+        }
+        for key, val in kwargs.items():
+            attr = mapping.get(key)
+            if attr is None or val is None:
+                continue
+            v = float(val)
+            if v <= 0:
+                continue
+            setattr(self, attr, v)
+
+    def get_calibration(self) -> dict:
+        return {
+            "k_disc":   self._K_DISC,
+            "k_fan":    self._K_FAN,
+            "k_temp_a": self._K_TEMP_A,
+            "k_temp_b": self._K_TEMP_B,
+        }
 
     def _check_coolprop(self) -> bool:
         try:

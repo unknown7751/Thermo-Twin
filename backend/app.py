@@ -82,6 +82,22 @@ except Exception as _twin_exc:
 
 _last_twin_state: dict = {}
 
+# --- Phase 7: drift detection + auto-recalibration ---
+try:
+    from drift_detector            import DriftDetector
+    from parameter_estimator       import BayesianParameterEstimator
+    from recalibration_scheduler   import RecalibrationScheduler, RecalibrationReason
+    _drift_detector       = DriftDetector(window_size_samples=500, accuracy_threshold_pct=95.0)
+    _parameter_estimator  = (BayesianParameterEstimator(physics_model=_twin_engine._physics)
+                              if _twin_engine is not None else None)
+    _recal_scheduler      = (RecalibrationScheduler(_parameter_estimator, _drift_detector)
+                              if _parameter_estimator is not None else None)
+    log.info("Phase 7 ready: drift detector + parameter estimator + recal scheduler")
+except Exception as _phase7_exc:
+    log.warning("Phase 7 init failed (%s) — recalibration endpoints will 503", _phase7_exc)
+    _drift_detector = _parameter_estimator = _recal_scheduler = None
+    RecalibrationReason = None
+
 # --- In-memory state ---
 
 alert_history = []
@@ -201,6 +217,28 @@ def _stream_loop():
                 twin_result = _twin_engine.process_sample(sample)
                 _last_twin_state.update(twin_result)
 
+            # Phase 7 — feed drift detector + buffer normal-op samples for
+            # later re-fitting; poll the scheduler so monthly / drift-triggered
+            # recalibrations fire automatically.
+            if _drift_detector is not None and twin_result:
+                _drift_detector.update(
+                    real      = sample,
+                    predicted = twin_result.get("prediction", {}),
+                    reconstruction_error = float(twin_result.get("rul", {}).get("peak_anomaly_score", 0.0) or 0.0),
+                )
+            if _parameter_estimator is not None and twin_result and not (alert):
+                _parameter_estimator.add_sample(
+                    power_kw     = sample["compressor_power_kw"],
+                    pressure_psi = sample["discharge_pressure_psi"],
+                    fan_rpm      = sample["fan_rpm"],
+                    temp_c       = sample["supply_air_temp_c"],
+                )
+            if _recal_scheduler is not None:
+                try:
+                    _recal_scheduler.check_and_trigger()
+                except Exception as _ex:
+                    log.error("Recal check_and_trigger failed: %s", _ex)
+
             # Hand off persistence to the background worker (non-blocking)
             if _influx or _mqtt:
                 twin_sample = TwinSample.from_streamer_dict(sample, machine_id="LIVE-DEMO-UNIT")
@@ -236,6 +274,39 @@ _persist_thread.start()
 _stream_thread = threading.Thread(target=_stream_loop, daemon=True, name="stream-loop")
 _stream_thread.start()
 log.info("Background stream loop started at 10 Hz")
+
+# ── Fleet (Phase 6) — multi-unit twin registry + slow tick loop ──────────────
+from fleet_manager import FleetManager, seed_demo_fleet
+
+_fleet_manager = FleetManager(
+    enable_influx=_influx is not None,
+    enable_mqtt  =_mqtt   is not None,
+    use_coolprop =False,
+)
+seed_demo_fleet(_fleet_manager)
+log.info("Fleet initialised with %d units: %s",
+         len(_fleet_manager.list_units()), _fleet_manager.list_units())
+
+
+def _fleet_tick_loop():
+    """Slow background tick (~1 Hz) that advances each fleet unit by one sample.
+
+    Kept slower than the main stream loop on purpose — fleet units don't need
+    chart-grade fps, they need a steady drift so RUL/divergence converge.
+    """
+    INTERVAL = 1.0
+    while True:
+        t0 = _time.monotonic()
+        try:
+            _fleet_manager.tick()
+        except Exception as exc:
+            log.error("Fleet tick error: %s", exc)
+        elapsed = _time.monotonic() - t0
+        _time.sleep(max(0, INTERVAL - elapsed))
+
+
+_fleet_thread = threading.Thread(target=_fleet_tick_loop, daemon=True, name="fleet-tick")
+_fleet_thread.start()
 
 demo_scenarios = {}
 if DEMO_JSON.exists():
@@ -562,6 +633,161 @@ def twin_reset():
     _twin_engine.reset()
     _last_twin_state.clear()
     return jsonify({"status": "reset"}), 200
+
+
+# ── Phase 7 — drift & recalibration endpoints ────────────────────────────────
+
+@app.get("/twin/drift")
+def twin_drift():
+    if _drift_detector is None:
+        return jsonify({"error": "drift detector not initialised"}), 503
+    cur   = _drift_detector.get_current_metrics()
+    trend = _drift_detector.get_drift_trend(hours=24)
+    return jsonify({"current": cur.to_dict(), "trend_24h": trend}), 200
+
+
+@app.get("/twin/parameters")
+def twin_parameters():
+    if _parameter_estimator is None:
+        return jsonify({"error": "parameter estimator not initialised"}), 503
+    return jsonify({
+        "current":         _parameter_estimator.get_current_parameters(),
+        "buffered_samples": _parameter_estimator.buffered_sample_count(),
+        "recent_updates":  [u.to_dict() for u in _parameter_estimator.get_update_history(20)],
+    }), 200
+
+
+@app.get("/twin/recalibration/status")
+def twin_recal_status():
+    if _recal_scheduler is None:
+        return jsonify({"error": "recalibration scheduler not initialised"}), 503
+    return jsonify(_recal_scheduler.get_status()), 200
+
+
+@app.post("/twin/recalibrate")
+def twin_recalibrate():
+    if _recal_scheduler is None:
+        return jsonify({"error": "recalibration scheduler not initialised"}), 503
+    body = request.get_json(silent=True) or {}
+    raw  = (body.get("reason") or "manual_request").upper()
+    try:
+        reason = RecalibrationReason[raw]
+    except KeyError:
+        reason = RecalibrationReason.MANUAL_REQUEST
+    # Demo-friendly: use the full buffer regardless of age so manual triggers
+    # always have data to fit against during a short live session.
+    event = _recal_scheduler.trigger_recalibration(
+        reason=reason,
+        lookback_hours=24 * 365,   # effectively "all buffered data"
+        confidence_threshold=0.0,  # accept all attempted updates above sanity guard
+    )
+    return jsonify(event.to_dict()), 200 if event.success else 500
+
+
+@app.post("/twin/commissioning-reset")
+def twin_commissioning_reset():
+    if _recal_scheduler is None:
+        return jsonify({"error": "recalibration scheduler not initialised"}), 503
+    body = request.get_json(silent=True) or {}
+    event = _recal_scheduler.trigger_commissioning_reset(
+        reason_text=body.get("reason", "maintenance_completed"),
+    )
+    return jsonify(event.to_dict()), 200
+
+
+# ── Fleet (Phase 6) endpoints ────────────────────────────────────────────────
+
+@app.get("/fleet/units")
+def fleet_list_units():
+    units = _fleet_manager.list_units()
+    return jsonify({
+        "units":       units,
+        "total_count": len(units),
+        "metadata":    {u: _fleet_manager.get_metadata(u) for u in units},
+    }), 200
+
+
+@app.get("/fleet/health")
+def fleet_health():
+    return jsonify(_fleet_manager.get_fleet_health()), 200
+
+
+@app.get("/fleet/dispatch-queue")
+def fleet_dispatch_queue():
+    top_n = request.args.get("top_n", default=None, type=int)
+    return jsonify(_fleet_manager.get_dispatch_queue(top_n=top_n)), 200
+
+
+@app.get("/fleet/anomalies")
+def fleet_anomalies():
+    hours = request.args.get("hours", default=24, type=int)
+    return jsonify(_fleet_manager.detect_cross_unit_anomalies(window_hours=hours)), 200
+
+
+@app.post("/fleet/register-unit")
+def fleet_register_unit():
+    data = request.get_json(silent=True) or {}
+    mid  = data.get("machine_id")
+    if not mid:
+        return jsonify({"error": "machine_id required"}), 400
+    ok = _fleet_manager.register_unit(
+        machine_id        = mid,
+        location          = data.get("location", ""),
+        model             = data.get("model", "Carrier-50000-Series"),
+        commissioned_date = data.get("commissioned_date"),
+        fault_profile     = data.get("fault_profile"),
+    )
+    if ok:
+        return jsonify({"status": "registered", "machine_id": mid}), 201
+    return jsonify({"error": "unit already registered or invalid"}), 400
+
+
+@app.delete("/fleet/<machine_id>")
+def fleet_unregister(machine_id):
+    if _fleet_manager.unregister_unit(machine_id):
+        return jsonify({"status": "unregistered", "machine_id": machine_id}), 200
+    return jsonify({"error": f"unit {machine_id} not found"}), 404
+
+
+@app.get("/fleet/<machine_id>/twin")
+def fleet_unit_twin(machine_id):
+    try:
+        twin = _fleet_manager.get_twin(machine_id)
+    except KeyError:
+        return jsonify({"error": f"unit {machine_id} not found"}), 404
+    return jsonify({
+        "machine_id": machine_id,
+        "metadata":   _fleet_manager.get_metadata(machine_id),
+        "twin":       twin._last_twin_state,
+    }), 200
+
+
+@app.post("/fleet/<machine_id>/sample")
+def fleet_unit_sample(machine_id):
+    data = request.get_json(silent=True) or {}
+    sample = {
+        "timestamp":              data.get("timestamp", 0.0),
+        "sample_index":           data.get("sample_index", 0),
+        "compressor_power_kw":    data.get("compressor_power_kw"),
+        "discharge_pressure_psi": data.get("discharge_pressure_psi"),
+        "fan_rpm":                data.get("fan_rpm"),
+        "supply_air_temp_c":      data.get("supply_air_temp_c"),
+    }
+    try:
+        result = _fleet_manager.process_sample(machine_id, sample)
+        return jsonify({"success": True, **result}), 200
+    except KeyError:
+        return jsonify({"error": f"unit {machine_id} not found"}), 404
+    except Exception as exc:
+        log.error("Fleet sample processing failed for %s: %s", machine_id, exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/fleet/<machine_id>/reset")
+def fleet_unit_reset(machine_id):
+    if _fleet_manager.reset_unit(machine_id):
+        return jsonify({"status": "reset", "machine_id": machine_id}), 200
+    return jsonify({"error": f"unit {machine_id} not found"}), 404
 
 
 # --- Entry point ---

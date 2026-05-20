@@ -46,11 +46,17 @@ class TwinEngine:
         use_coolprop: bool = True,
         nominal_ambient_c: float = 35.0,
         time_unit_seconds: float = 1.0,
+        machine_id: str = "LIVE-DEMO-UNIT",
     ):
+        self.machine_id       = machine_id
         self._physics         = HVACPhysicsModel(use_coolprop=use_coolprop)
         self._degradation     = DegradationModel()
         self._kalman          = KalmanStateEstimator(degradation_model=self._degradation)
         self._nominal_ambient = nominal_ambient_c
+        # Cached most-recent outputs so FleetManager can aggregate health without
+        # re-running the pipeline. Updated at the end of every process_sample().
+        self._last_twin_state: dict = {}
+        self._last_rul_state:  dict = {}
 
         # Load LSTM checkpoint if available; falls back to linear regression silently
         lstm_path = str(_LSTM_CHECKPOINT) if _LSTM_CHECKPOINT.exists() else None
@@ -128,7 +134,17 @@ class TwinEngine:
         rul_analytical = self._rul_engine.update(updated_health, rates, uncertainty_pct=15.0)
         rul_mc         = self._pf.predict_rul_distribution(updated_health, rates)
 
-        return {
+        rul_payload = {
+            **rul_analytical,
+            "mc": rul_mc,
+            "history_samples": len(self._trajectory),
+            "rate_mode": "lstm" if (
+                self._trajectory._lstm is not None
+                and len(self._trajectory) >= self._trajectory._lookback
+            ) else "linear",
+        }
+
+        result = {
             "state": {
                 "refrigerant_charge_pct":    round(float(kalman_result.x[0]), 1),
                 "compressor_efficiency_pct": round(float(kalman_result.x[1]), 1),
@@ -139,16 +155,13 @@ class TwinEngine:
             "uncertainty":    kalman_result.uncertainty,
             "estimator_mode": kalman_result.mode,
             "model_used":     degraded_pred.model_used,
-            "rul": {
-                **rul_analytical,
-                "mc": rul_mc,
-                "history_samples": len(self._trajectory),
-                "rate_mode": "lstm" if (
-                    self._trajectory._lstm is not None
-                    and len(self._trajectory) >= self._trajectory._lookback
-                ) else "linear",
-            },
+            "rul":            rul_payload,
         }
+
+        # Cache for FleetManager (avoids re-running the pipeline for aggregation)
+        self._last_twin_state = result
+        self._last_rul_state  = rul_payload
+        return result
 
     def simulate_whatif(self, params: dict) -> dict:
         """
@@ -173,6 +186,8 @@ class TwinEngine:
         """Reset Kalman state and health history (call after part replacement or stream reset)."""
         self._kalman.reset()
         self._trajectory.clear()
+        self._last_twin_state = {}
+        self._last_rul_state  = {}
 
     def get_state(self) -> dict:
         """Return current estimated health state without processing a new sample."""
