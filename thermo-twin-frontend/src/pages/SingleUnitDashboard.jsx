@@ -4,8 +4,9 @@ import FaultControls from '../components/FaultControls.jsx'
 import HVAC3D        from '../components/HVAC3D.jsx'
 import TwinPanel     from '../components/TwinPanel.jsx'
 import RULPanel      from '../components/RULPanel.jsx'
-import WhatIfPanel   from '../components/WhatIfPanel.jsx'
-import ShapPanel     from '../components/ShapPanel.jsx'
+import WhatIfPanel        from '../components/WhatIfPanel.jsx'
+import RecalibrationPanel from '../components/RecalibrationPanel.jsx'
+import ShapPanel          from '../components/ShapPanel.jsx'
 import AlertLog      from '../components/AlertLog.jsx'
 import { useStreamData } from '../hooks/useStreamData.js'
 
@@ -31,6 +32,7 @@ export default function SingleUnitDashboard() {
       </div>
 
       <WhatIfPanel />
+      <RecalibrationPanel />
       <ShapPanel />
       <AlertLog />
     </main>

@@ -127,6 +127,19 @@ const useAppStore = create((set) => ({
     set((s) => ({ fleet: { ...s.fleet, ...patch, lastFetched: Date.now() } })),
   setFleetOnline: (v) =>
     set((s) => ({ fleet: { ...s.fleet, online: v } })),
+
+  // ── Recalibration / drift (Phase 7) ────────────────────────────────────────
+  recal: {
+    drift:      null,    // /twin/drift response
+    parameters: null,    // /twin/parameters response
+    status:     null,    // /twin/recalibration/status response
+    online:     false,
+    lastFetched: null,
+  },
+  setRecal: (patch) =>
+    set((s) => ({ recal: { ...s.recal, ...patch, lastFetched: Date.now() } })),
+  setRecalOnline: (v) =>
+    set((s) => ({ recal: { ...s.recal, online: v } })),
 }))
 
 export default useAppStore
