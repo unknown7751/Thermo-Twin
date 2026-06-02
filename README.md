@@ -319,7 +319,7 @@ The model was trained **entirely on synthetic data** and tested on **real buildi
 | **Fault Detection Rate** | **100%** |
 | **Faults with Severity ≥ 70** | **100%** |
 
-**Confusion Matrix:**
+**Confusion Matrix :**
 ```
                       Predicted Normal    Predicted Fault
 True Normal (synth)         102                 1
