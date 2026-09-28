@@ -325,7 +325,7 @@ Training configuration:
 Threshold calibration (val set):
   val_mean     : 0.148406
   val_std      : 0.020931
-  threshold    : 0.200733  (mean + 2.5σ)
+  threshold    : 0.200071  (mean + 2.5σ)
 ```
 
 | Label | MSE mean | MSE std | Severity mean | Target |

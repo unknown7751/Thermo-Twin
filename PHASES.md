@@ -20,7 +20,7 @@ DAY 1                          DAY 2                    DAY 3
 │                              │                        │
 ├─ Phase 1: Data       ✅      ├─ Phase 4: SHAP   ✅    ├─ Phase 6: Dashboard  ✅
 ├─ Phase 2: Preprocess ✅      ├─ Phase 5: Backend ✅   ├─ Phase 7: Polish     ✅
-└─ Phase 3: Model      ✅      └─ Tier 1+2 Upgrades ✅  └─ Phase 8: LBNL Val   ✅
+└─ Phase 3: Model      ✅      └─ Tier 1+2 Upgrades ✅  └─ Phase 8: Evaluation ✅
 ```
 
 | Phase | Task | Status | Est. Time |
@@ -32,7 +32,7 @@ DAY 1                          DAY 2                    DAY 3
 | 5 | Alert Backend (Flask) | ✅ Done | 2h |
 | 6 | Operator Dashboard (Streamlit) | ✅ Done | 3h |
 | 7 | Polish & Pitch Prep | ✅ Done | 2h |
-| 8 | LBNL Real-World Validation | ✅ Done | 2h |
+| 8 | Generated-Data Evaluation | ✅ Done | 2h |
 
 ---
 
@@ -128,7 +128,7 @@ Input(200) → Linear(200→128) → ReLU
 - Trained on normal windows only (412 windows)
 - Denoising regularization: noise_std = 0.02
 - Early stopping: patience = 80
-- Threshold = val_mean + 2.5 × val_std = **0.2007**
+- Threshold = val_mean + 2.5 × val_std = **0.200071**
 
 ### Isolation Forest (Fallback)
 - 300 estimators, contamination = 0.05
@@ -267,7 +267,7 @@ GET  /dashboard       — serve standalone HTML dashboard
 
 ### What Was Built
 
-Full Streamlit operator dashboard with Plotly visualizations, real-time alert monitoring, and LBNL validation panel.
+Full operator dashboard with real-time alert monitoring and generated-data evaluation metrics.
 
 ### UI Elements Implemented
 
@@ -283,7 +283,7 @@ Full Streamlit operator dashboard with Plotly visualizations, real-time alert mo
 | Demo trigger buttons (3 scenarios) | ✅ Implemented |
 | Severity profile selector (Hospital/Cold Chain/Office/Warehouse) | ✅ Implemented |
 | Per-unit baseline display | ✅ Implemented |
-| LBNL Real-World Validation panel | ✅ Implemented |
+| Generated-data evaluation metrics | ✅ Implemented |
 
 ### Done Checklist
 - [x] All 4 sensor streams plotted (with fault moment visible)
@@ -293,7 +293,7 @@ Full Streamlit operator dashboard with Plotly visualizations, real-time alert mo
 - [x] Fault type and prescription display on each alert card
 - [x] All 3 demo scenarios trigger cleanly via button
 - [x] Alert log shows last 10 alerts with full detail
-- [x] LBNL real-world validation metrics displayed
+- [x] Generated-data evaluation metrics displayed
 
 ---
 
@@ -317,7 +317,7 @@ Full Streamlit operator dashboard with Plotly visualizations, real-time alert mo
 
 | Objection | Response |
 |---|---|
-| "You don't have real sensor data." | We trained on synthetic data and validated on LBNL's real building fault dataset — achieving F1=0.9996 and 100% fault detection. The sim-to-real transfer proves our model generalizes beyond training data. |
+| "You don't have real sensor data." | The current evaluation is explicitly based on generated HVAC data, with held-out normal windows and three injected fault types. |
 | "How do you deploy sensors on existing HVAC units?" | Carrier's Digital Connectivity team already installs BACnet bridges and IoT gateways at customer sites daily. We reuse that exact deployment capability — no new hardware infrastructure needed. |
 | "Why wouldn't Carrier just use rule-based fault codes?" | ClimaVision already sends fault codes. Thermo-Twin adds the prescriptive layer on top — it tells you *which part to bring*, not just that something is wrong. |
 | "What about model degradation over time?" | The dynamic ThresholdManager recalibrates from rolling normal-operation data. Seasonal changes shift the normal baseline — the rolling 95th percentile corrects automatically without touching the architecture. |
@@ -325,37 +325,24 @@ Full Streamlit operator dashboard with Plotly visualizations, real-time alert mo
 
 ---
 
-## Phase 8 — LBNL Real-World Validation ✅ DONE
+## Phase 8 — Generated-Data Evaluation ✅ DONE
 
-**Files:** `lbnl_validation/01_explore.py` through `04_evaluate.py`
-**Output:** `model/checkpoints/lbnl_evaluation_results.json`
-
-### What Was Built
-
-Sim-to-Real Transfer Validation pipeline: the synthetic-trained model (no retraining) was tested on 30,240 real RTU data points from the LBNL building fault detection dataset.
-
-**Pipeline steps:**
-1. Data exploration (RTU.csv, 69 sensor columns)
-2. Column mapping (RTU columns → 4-sensor schema) + MinMax range scaling
-3. Sliding window preprocessing + combined test set creation
-4. Evaluation using existing synthetic-trained autoencoder
+**Files:** `model/train.py`, `model/evaluate.py`
+**Output:** `model/checkpoints/threshold_config.json` and evaluation metrics
 
 ### Results
 
-| Metric | Value |
-|---|---|
-| F1 Score | **0.9996** |
-| ROC-AUC | **1.0000** |
-| Recall | **1.0000** (all 1,208 real faults detected) |
-| Precision | **0.9992** |
+| Metric | Autoencoder | Isolation Forest |
+|---|---|---|
+| F1 Score | **0.9766** | 0.8983 |
+| ROC-AUC | **0.9841** | 0.9681 |
+| Precision | **0.9963** | 0.9832 |
+| Recall | **0.9576** | 0.8269 |
 
 ### Done Checklist
-- [x] LBNL data explored and understood
-- [x] Column mapping validated (4 sensors matched)
-- [x] Combined test set created (103 synthetic normals + 1,208 LBNL faults)
-- [x] Evaluation complete with near-perfect metrics
-- [x] Results integrated into dashboard
-- [x] Dedicated `lbnl_validation/` directory with README
+- [x] Generated-data train, validation, and test splits created
+- [x] Autoencoder and Isolation Forest evaluated
+- [x] Evaluation metrics captured in `EVALUATION.md`
 
 ---
 
@@ -371,7 +358,7 @@ Sim-to-Real Transfer Validation pipeline: the synthetic-trained model (no retrai
 ✅ Demo runs clean 3 times in a row
 ✅ Isolation Forest fallback ready to swap in
 ✅ All 5 objection responses ready
-✅ LBNL real-world validation: F1=0.9996, 100% fault detection
+✅ Generated-data evaluation: Autoencoder F1=0.9766, ROC-AUC=0.9841
 ```
 
 ---
