@@ -18,7 +18,7 @@
 7. [Backend API](#7-backend-api)
 8. [Realtime Dashboard](#8-realtime-dashboard)
 9. [Model Performance](#9-model-performance)
-10. [Real-World Validation — LBNL Dataset](#10-real-world-validation--lbnl-dataset)
+10. [Generated-Data Evaluation](#10-generated-data-evaluation)
 11. [Energy Cost Attribution](#11-energy-cost-attribution)
 12. [Running the Project](#12-running-the-project)
 13. [File Reference](#13-file-reference)
@@ -36,7 +36,7 @@ Unlike threshold-based building management systems (BMS) that fire a generic "Hi
 - **What to do** (stop unit / dispatch with part X)
 - **How much it costs** to wait (wasted kWh, ₹/day, payback period)
 
-The model is trained entirely on synthetic data and achieves **F1 = 0.9996** and **100% fault detection rate** on real-world LBNL building sensor data — demonstrating genuine sim-to-real transfer, not overfitting.
+The model is trained on normal generated HVAC windows and evaluated on held-out generated windows containing normal operation and three injected fault types. The autoencoder achieves **F1 = 0.9766** and **ROC-AUC = 0.9841**.
 
 ---
 
@@ -132,7 +132,7 @@ dashboard/app.py  (Streamlit, port 8501)
     Energy cost impact card (₹/USD, payback period)
     Severity profile selector (4 deployment contexts)
     Alert log with color-coded severity rows
-    LBNL real-world validation panel
+    Generated-data evaluation panel
 ```
 
 ---
@@ -464,9 +464,9 @@ Three buttons trigger fault scenarios via `POST /demo/<scenario>`:
 
 The dashboard immediately re-renders with pre-computed SHAP, severity, and prescription.
 
-### LBNL Validation Panel
+### Generated-Data Evaluation Panel
 
-Static panel at the bottom of the dashboard showing real-world transfer metrics (F1, ROC-AUC, confusion matrix) from the LBNL validation run.
+The dashboard displays the current generated-data evaluation metrics, including F1, ROC-AUC, confusion matrix, and per-fault detection rates.
 
 ---
 
@@ -478,20 +478,20 @@ Static panel at the bottom of the dashboard showing real-world transfer metrics 
 
 | Metric | Autoencoder | Isolation Forest |
 |---|---|---|
-| ROC-AUC | **1.0000** | 0.9680 |
-| F1 Score | **0.9960** | 0.8980 |
-| Precision | 0.9920 | 0.9830 |
-| Recall | **1.0000** | 0.8270 |
+| ROC-AUC | **0.9841** | 0.9681 |
+| F1 Score | **0.9766** | 0.8983 |
+| Precision | **0.9963** | 0.9832 |
+| Recall | **0.9576** | 0.8269 |
 | False Positives | **1** | 4 |
 
 **Per-fault severity scores:**
 
 | Fault Type | Windows | Mean Severity | % Above 70 |
 |---|---|---|---|
-| Normal | 103 | 29.6 | 0% |
+| Normal | 103 | 29.7 | 0% |
 | Refrigerant Leak | 55 | 90.6 | 96.4% |
-| Condenser Fan Failure | 68 | 92.8 | 97.1% |
-| Compressor Wear | 160 | 73.7 | 65.6% |
+| Condenser Fan Failure | 68 | 92.7 | 97.1% |
+| Compressor Wear | 160 | 73.7 | 65.0% |
 
 **Key thresholds (from `threshold_config.json`):**
 
@@ -521,50 +521,18 @@ All three scenarios pass verification (severity > 70 on 100% of fault windows).
 
 ---
 
-## 10. Real-World Validation — LBNL Dataset
+## 10. Generated-Data Evaluation
 
-The model is trained entirely on synthetic data. To prove real-world generalizability, it was evaluated on the **LBNL Automated Fault Detection Dataset** — 30,240 real RTU sensor readings from a commercial building (Aug 2017 – Feb 2018, Kaggle).
+The model is evaluated on 386 held-out generated windows: 103 normal, 55 refrigerant leak, 68 fan failure, and 160 compressor wear.
 
-### Mapping Approach (`lbnl_validation/02_map_columns.py`)
-
-LBNL columns are mapped to the four-stream schema using domain-equivalent measurements:
-- Supply air temperature → `supply_air_temp_c`
-- Compressor power proxy → `compressor_power_kw`
-- Fan speed → `fan_rpm`
-- Discharge pressure proxy → `discharge_pressure_psi`
-
-MinMaxScaler maps each LBNL column into the synthetic training range using `range_mappers.pkl`.
-
-### Combined Test Set (`lbnl_validation/03_preprocess.py`)
-
-| Subset | Windows | Source |
+| Metric | Autoencoder | Isolation Forest |
 |---|---|---|
-| Normal | 103 | Synthetic (held-out val set) |
-| Fault | 1,208 | LBNL real building faults |
-| **Total** | **1,311** | Mixed sim-to-real |
+| **F1 Score** | **0.9766** | 0.8983 |
+| **ROC-AUC** | **0.9841** | 0.9681 |
+| **Precision** | **0.9963** | 0.9832 |
+| **Recall** | **0.9576** | 0.8269 |
 
-### Transfer Results (`lbnl_evaluation_results.json`)
-
-| Metric | Value |
-|---|---|
-| **F1 Score** | **0.9996** |
-| **ROC-AUC** | **1.0000** |
-| **Recall** | **1.0000** — all 1,208 real faults detected |
-| **Precision** | **0.9992** — 1 false positive out of 103 normal windows |
-| **Fault Detection Rate** | **100%** |
-| **Faults with Severity ≥ 70** | **100%** |
-| **Normal Mean Severity** | 29.6 |
-| **Fault Mean Severity** | 89.1 |
-
-**Confusion Matrix:**
-
-```
-                    Predicted Normal    Predicted Fault
-True Normal (synth)       102                 1
-True Fault  (LBNL)          0              1208
-```
-
-This result demonstrates genuine **sim-to-real generalization**: the thermodynamic relationships learned from synthetic data are sufficiently universal that the model transfers to a completely different building, different equipment, and real sensor noise without retraining.
+Normal windows score below 40 in 99.0% of cases. Refrigerant leak and fan failure windows are detected at 100%; compressor wear windows are detected at 92.5%.
 
 ---
 
@@ -631,17 +599,11 @@ python model/evaluate.py
 # Step 5 — Pre-compute SHAP demo explanations (~2 min)
 python explainability/precompute_explanations.py
 
-# Step 6 — (Optional) LBNL real-world validation
-python lbnl_validation/01_explore.py
-python lbnl_validation/02_map_columns.py
-python lbnl_validation/03_preprocess.py
-python lbnl_validation/04_evaluate.py
-
-# Step 7 — Start backend API (Terminal 1)
+# Step 6 — Start backend API (Terminal 1)
 python backend/app.py
 # → Running on http://localhost:5000
 
-# Step 8 — Launch dashboard (Terminal 2)
+# Step 7 — Launch dashboard (Terminal 2)
 streamlit run dashboard/app.py
 # → Running on http://localhost:8501
 ```
@@ -671,11 +633,6 @@ Thermo-Twin-realtime/
 │   │   ├── val_windows.npz           103 normal windows (20% split)
 │   │   ├── test_windows.npz          386 windows (all 4 labels)
 │   │   ├── scaler.pkl                StandardScaler (fitted on train only)
-│   │   ├── lbnl_fault_windows.npz    1,208 LBNL real-building fault windows
-│   │   └── lbnl_combined_test.npz    1,311 combined test windows
-│   ├── real/
-│   │   ├── lbnl_mapped.csv           30,240 LBNL rows mapped to 4-sensor schema
-│   │   └── range_mappers.pkl         MinMaxScaler for LBNL range mapping
 │   └── preprocess.py                 Sliding window pipeline + commissioning baselines
 │
 ├── model/
@@ -688,7 +645,6 @@ Thermo-Twin-realtime/
 │       ├── autoencoder.pt            Trained weights + hyperparams
 │       ├── isolation_forest.pkl      Fallback model weights
 │       ├── threshold_config.json     Calibrated threshold + p99 anomaly value
-│       ├── lbnl_evaluation_results.json   Sim-to-real transfer metrics
 │       └── unit_baselines/           CARRIER-CHILLER-01.json · CARRIER-VRF-UNIT-01.json
 │
 ├── explainability/
@@ -703,12 +659,6 @@ Thermo-Twin-realtime/
 ├── dashboard/
 │   ├── app.py                        Streamlit dashboard (port 8501)
 │   └── index.html                    Standalone HTML dashboard (no server required)
-│
-├── lbnl_validation/
-│   ├── 01_explore.py                 LBNL data exploration
-│   ├── 02_map_columns.py             Column mapping + range scaling
-│   ├── 03_preprocess.py              Sliding windows + combined test set
-│   └── 04_evaluate.py                Sim-to-real evaluation
 │
 └── requirements.txt
 ```

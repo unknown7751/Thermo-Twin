@@ -24,11 +24,11 @@ Scaler was fitted on training normals only — zero leakage.
 
 | Metric | Autoencoder | Isolation Forest |
 |---|---|---|
-| **ROC-AUC** | **0.9855** | 0.9681 |
-| **F1 Score** | **0.9747** | 0.8983 |
+| **ROC-AUC** | **0.9841** | 0.9681 |
+| **F1 Score** | **0.9766** | 0.8983 |
 | Precision | 0.9963 | 0.9832 |
-| Recall | 0.9541 | 0.8269 |
-| Avg Precision (AP) | 0.9956 | 0.9888 |
+| Recall | 0.9576 | 0.8269 |
+| Avg Precision (AP) | 0.9952 | 0.9888 |
 
 ### Confusion Matrices
 
@@ -37,10 +37,10 @@ Scaler was fitted on training normals only — zero leakage.
 |  | Pred Normal | Pred Anomaly |
 |---|---|---|
 | **True Normal** | 102 | 1 |
-| **True Anomaly** | 13 | 270 |
+| **True Anomaly** | 12 | 271 |
 
 - False Positive Rate: **0.97%** — 1 normal window flagged as anomaly
-- False Negative Rate: **4.59%** — 13 anomaly windows missed
+- False Negative Rate: **4.24%** — 12 anomaly windows missed
 
 **Isolation Forest**
 
@@ -58,10 +58,10 @@ Scaler was fitted on training normals only — zero leakage.
 
 | Fault Type | n | MSE Mean | MSE Std | Severity Mean | % Above Threshold | % Score ≥ 70 |
 |---|---|---|---|---|---|---|
-| Normal | 103 | 0.1468 | 0.0205 | 29.6 | 1.0% | 0.0% |
-| Refrigerant Leak | 55 | 12.2120 | 7.3195 | **90.7** | **100.0%** | 96.4% |
-| Fan Failure | 68 | 13.7950 | 6.6071 | **92.8** | **100.0%** | 97.1% |
-| Compressor Wear | 160 | 5.2037 | 4.8305 | **73.9** | 91.9% | 65.6% |
+| Normal | 103 | 0.1481 | 0.0208 | 29.7 | 1.0% | 0.0% |
+| Refrigerant Leak | 55 | 12.4118 | 7.4048 | **90.6** | **100.0%** | 96.4% |
+| Fan Failure | 68 | 13.8392 | 6.6118 | **92.7** | **100.0%** | 97.1% |
+| Compressor Wear | 160 | 5.2057 | 4.8308 | **73.7** | 92.5% | 65.0% |
 
 Key observations:
 - All refrigerant leak and fan failure windows are detected — 100% recall on both faults.
@@ -85,7 +85,7 @@ Severity is computed as:
 severity = clip( (mse - threshold_min) / (threshold_range) × 100, 0, 100 )
 ```
 
-Threshold: `val_mean + 2.5 × val_std = 0.2007`
+Threshold: `val_mean + 2.5 × val_std = 0.200071`
 
 ### Severity Thresholds
 
@@ -140,7 +140,7 @@ refrigerant_leak      1.000     0.873     0.932        55
 | Bottleneck | 8 dimensions |
 | Training data | Normal windows only (412 windows) |
 | Validation data | Normal windows only (103 windows) |
-| Threshold | `val_mean + 2.5σ = 0.2007` |
+| Threshold | `val_mean + 2.5σ = 0.200071` |
 | Denoising noise std | 0.02 |
 | Early stopping patience | 80 epochs |
 | Isolation Forest estimators | 300 |
@@ -183,9 +183,9 @@ compressor_power_pct > 45%  →  Progressive Compressor Mechanical Wear
 
 ```
 Autoencoder
-  Threshold   : 0.2007  (val mean + 2.5σ)
-  ROC-AUC     : 1.0000
-  F1 (binary) : 0.9960
+  Threshold   : 0.200071  (val mean + 2.5σ)
+  ROC-AUC     : 0.9841
+  F1 (binary) : 0.9766
   Normal ≤ 40 : 99.0%  (near-zero false alarms)
   Fault sev   : refrigerant_leak=91  fan_failure=93  compressor_wear=74
 
@@ -200,69 +200,15 @@ without changing the API or dashboard.
 
 ---
 
-## Real-World Validation (LBNL Dataset)
-
-The synthetic-trained autoencoder was tested on **real building sensor data** from the
-[LBNL Automated Fault Detection Dataset](https://www.kaggle.com/datasets/claytonmiller/lbnl-automated-fault-detection-for-buildings-data?resource=download)
-(30,240 data points from a commercial RTU, Aug 2017 – Feb 2018). No retraining was performed.
-
-### Combined Test Set
-
-| Source | Type | Windows |
-|---|---|---|
-| Synthetic validation set | Normal | 103 |
-| LBNL RTU real data | Fault | 1,208 |
-| **Total** | **Mixed** | **1,311** |
-
-### Binary Classification — Sim-to-Real Transfer
-
-| Metric | Value |
-|---|---|
-| **F1 Score** | **0.9996** |
-| **ROC-AUC** | **1.0000** |
-| Precision | 0.9992 |
-| Recall | 1.0000 |
-| Avg Precision | 1.0000 |
-
-### Confusion Matrix
-
-|  | Pred Normal | Pred Fault |
-|---|---|---|
-| **True Normal (synth)** | 102 | 1 |
-| **True Fault (LBNL)** | 0 | 1,208 |
-
-- False Positive Rate: **0.97%** — 1 normal window flagged
-- False Negative Rate: **0.00%** — zero real faults missed
-
-### Severity Scores
-
-| Source | Mean Severity | ≤ 40 | ≥ 70 |
-|---|---|---|---|
-| Normal (synthetic) | 29.6 | 99.0% | 0% |
-| Fault (LBNL real) | 89.1 | 0% | **100%** |
-
-All 1,208 real building faults were detected with severity scores ≥ 70,
-demonstrating that the synthetic-trained model generalizes to real-world data.
-
-> Full pipeline documentation: `lbnl_validation/README.md`
-
----
-
 ## Summary
 
 ```
 Autoencoder (Synthetic Test)
-  Threshold   : 0.2007  (val mean + 2.5σ)
-  ROC-AUC     : 1.0000
-  F1 (binary) : 0.9960
+  Threshold   : 0.200071  (val mean + 2.5σ)
+  ROC-AUC     : 0.9841
+  F1 (binary) : 0.9766
   Normal ≤ 40 : 99.0%  (near-zero false alarms)
   Fault sev   : refrigerant_leak=91  fan_failure=93  compressor_wear=74
-
-Autoencoder (LBNL Real-World Test)
-  F1 Score    : 0.9996
-  ROC-AUC     : 1.0000
-  Recall      : 1.0000  (all 1,208 real faults detected)
-  Precision   : 0.9992  (1 false positive out of 103 normals)
 
 Isolation Forest  (fallback — swap in within 2 minutes if autoencoder fails)
   Threshold   : -0.009
